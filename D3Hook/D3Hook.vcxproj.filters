@@ -1,0 +1,36 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="main.h" />
+    <ClInclude Include="address.h">
+      <Filter>game</Filter>
+    </ClInclude>
+    <ClInclude Include="driv3r.h">
+      <Filter>game</Filter>
+    </ClInclude>
+    <ClInclude Include="IDirect3D9Hook.h">
+      <Filter>d3d</Filter>
+    </ClInclude>
+    <ClInclude Include="IDirect3DDevice9Hook.h">
+      <Filter>d3d</Filter>
+    </ClInclude>
+    <ClInclude Include="util.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="IDirect3D9Hook.cpp">
+      <Filter>d3d</Filter>
+    </ClCompile>
+    <ClCompile Include="IDirect3DDevice9Hook.cpp">
+      <Filter>d3d</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="game">
+      <UniqueIdentifier>{e8dce1a8-4318-437a-a409-4030d313283a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="d3d">
+      <UniqueIdentifier>{7d639bb9-1690-4366-aea5-b62a4f8d7c59}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
