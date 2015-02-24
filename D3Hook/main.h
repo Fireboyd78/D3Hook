@@ -6,6 +6,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <windows.h>
 #include <windowsx.h>
 
@@ -19,3 +20,21 @@
 #include "driv3r.h"
 #include "IDirect3D9Hook.h"
 #include "IDirect3DDevice9Hook.h"
+
+struct IVTableHook
+{    
+private:
+    DWORD *m_address;
+public:
+    IVTableHook(DWORD dwAddress) { m_address = _PTR(dwAddress); }
+    
+    ~IVTableHook() {}
+
+    operator LPVOID () {
+        return (LPVOID)m_address;
+    }
+
+    const LPVOID GetMemberAddress(DWORD dwOffset) {
+        return (LPVOID)(*m_address + dwOffset);
+    };
+};

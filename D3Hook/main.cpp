@@ -8,6 +8,9 @@ IDirect3DDevice9        *pD3DDevice;
 IDirect3D9Hook          *pD3DHook;
 IDirect3DDevice9Hook    *pD3DDeviceHook;
 
+IVTableHook             *pInputHook;
+IVTableHook             *pWindowHook;
+
 WNDPROC hProcOld;
 LRESULT APIENTRY WndProcNew(HWND, UINT, WPARAM, LPARAM);
 
@@ -17,7 +20,7 @@ bool SubclassGameWindow()
 
     LOG("Subclassing window...");
 
-    if (gameWnd)
+    if (gameWnd != NULL)
     {
         hProcOld = (WNDPROC)GetWindowLong(gameWnd, GWL_WNDPROC);
 
@@ -259,8 +262,28 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return CallWindowProc(hProcOld, hWnd, uMsg, wParam, lParam);
 }
 */
-#pragma region /Broken message handlers
+#pragma endregion
 
+NAKED void __fastcall HOOK_ThisCall(DWORD dwAddress, DWORD dwOffset)
+{
+    __asm {
+        mov ecx, __DWPTR_DS(ecx)
+        mov esi, [ecx]
+
+        call __DWPTR(esi + edx)
+        retn
+    }
+}
+
+NAKED LPVOID __fastcall HOOK_GetProcAddress(LPVOID lpVt, DWORD dwOffset)
+{
+    __asm {
+        mov eax, [eax]
+        add eax, edx
+
+        retn
+    }
+}
 
 LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -276,12 +299,14 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         case WM_DESTROY:
         {
-            __asm {
-                mov ecx, __DWPTR_DS(0x8AC238)
-                mov esi, [ecx]
+            //__asm {
+            //    mov ecx, __DWPTR_DS(0x8AC238)
+            //    mov esi, [ecx]
+            //
+            //    call __DWPTR(esi + 80h)
+            //}
 
-                call __DWPTR(esi + 80h)
-            }
+            HOOK_ThisCall(0x8AC238, 0x80);
 
             return 0;
         }
@@ -290,28 +315,40 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         {
             if (*(bool*)0x8AFA44)
             {
-                int xPos = GET_X_LPARAM(lParam);
-                int yPos = GET_Y_LPARAM(lParam);
+                //int xPos = GET_X_LPARAM(lParam);
+                //int yPos = GET_Y_LPARAM(lParam);
 
+                POINTS wndPos = MAKEPOINTS(lParam);
+                
                 float *wndX = (float*)(*ptr + 0x14);
                 float *wndY = (float*)(*ptr + 0x18);
 
+                *wndX = (float)wndPos.x;
+                *wndY = (float)wndPos.y;
+
+                //__asm {
+                //    fild xPos
+                //    fstp [wndX]
+                //    push [wndX]
+                //
+                //    fild yPos
+                //    fstp [wndY]
+                //    push [wndY]
+                //
+                //    //mov ecx, __DWPTR_DS(0x8AC238)
+                //    //mov esi, [ecx]
+                //    //
+                //    //call __DWPTR(esi + 84h);
+                //}
+
                 __asm {
-                    fild xPos
-                    fstp [wndX]
-                    push [wndX]
-
-                    fild yPos
-                    fstp [wndY]
                     push [wndY]
-
-                    mov ecx, __DWPTR_DS(0x8AC238)
-                    mov esi, [ecx]
-                
-                    call __DWPTR(esi + 84h);
+                    push [wndX]
                 }
 
-                char buf[20]; // 'window_size %d %d'
+                HOOK_ThisCall(0x8AC238, 0x84);
+
+                char buf[255]; // 'window_size %d %d'
 
                 _snprintf(buf, sizeof(buf), (char*)(0x78C4C0), xPos, yPos);
                 OutputDebugStringA(buf);
@@ -320,12 +357,14 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     lea eax, buf
                     push eax
                 
-                    mov ecx, __DWPTR_DS(0x8AC268)
-                    mov edx, [ecx]
-                
-                    // send it off to the message pump!
-                    call __DWPTR(edx + 10h)
+                    //mov ecx, __DWPTR_DS(0x8AC268)
+                    //mov edx, [ecx]
+                    //
+                    //// send it off to the message pump!
+                    //call __DWPTR(edx + 10h)
                 }
+
+                HOOK_ThisCall(0x8AC268, 0x10);
             }
 
             return 0;
@@ -358,8 +397,8 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
             float x, y;
 
-            int w1 = (wParam >> 3) & 1;
-            int w2 = (wParam >> 2) & 1;
+            int w1 = (wParam >> 2) & 1;
+            int w2 = (wParam >> 3) & 1;
 
             __asm {
                 fild xPos
@@ -370,16 +409,18 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 fdiv [wndY]
                 fstp y
 
-                push x
                 push y
-                push w1
+                push x
                 push w2
+                push w1
 
-                mov ecx, __DWPTR_DS(0x8AC270)
-                mov esi, [ecx]
-
-                call __DWPTR(esi + 48h);
+                //mov ecx, __DWPTR_DS(0x8AC270)
+                //mov esi, [ecx]
+                //
+                //call __DWPTR(esi + 48h);
             }
+
+            HOOK_ThisCall(0x8AC270, 0x48);
 
             return 0;
         }
@@ -392,14 +433,20 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             int xPos = GET_X_LPARAM(lParam);
             int yPos = GET_Y_LPARAM(lParam);
 
-            float *wndX = (float*)(*ptr + 0x14);
-            float *wndY = (float*)(*ptr + 0x18);
+            float wndX = *(float*)(*ptr + 0x14);
+            float wndY = *(float*)(*ptr + 0x18);
 
-            float x, y;
+            //float x, y;
 
-            int w1 = (wParam >> 3) & 1;
-            int w2 = (wParam >> 2) & 1;
+            POINTFLOAT pos {
+                (xPos / wndX),
+                (yPos / wndY)
+            };
 
+            int w1 = (wParam >> 2) & 1;
+            int w2 = (wParam >> 3) & 1;
+
+            /*
             __asm {
                 fild xPos
                 fdiv [wndX]
@@ -437,9 +484,13 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 mov eax, 20h
                 lea eax, [eax + (edx * 4)] // range is 20h-34h
                 
-                call __DWPTR(esi + eax)
+                call __DWPTR(esi + eax)  
             }
+            */
 
+            LPVOID proc = pInputHook->GetMemberAddress(0x20 + ((uMsg - WM_LBUTTONDOWN) * 4));
+
+            ((void(__thiscall *)(THIS_ void*, int, int, POINTFLOAT))proc)(pInputHook, w1, w2, pos);
             return 0;
         }
 
@@ -458,8 +509,8 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
                 float x, y;
 
-                int w1 = (wParam >> 3) & 1;
-                int w2 = (wParam >> 2) & 1;
+                int w1 = (wParam >> 2) & 1;
+                int w2 = (wParam >> 3) & 1;
 
                 __asm {
                     fild xPos
@@ -470,10 +521,10 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     fdiv [wndY]
                     fstp y
 
-                    push x
                     push y
-                    push w1
+                    push x
                     push w2
+                    push w1
 
                     mov ecx, __DWPTR_DS(0x8AC270)
                     mov eax, [ecx]
@@ -515,6 +566,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
             //pDriv3r->SetD3D((DWORD)pD3DHook);
             //LOG("pDriv3r->SetD3DDevice");
             //pDriv3r->SetD3DDevice(pD3DDeviceHook);
+
+            pInputHook = new IVTableHook(0x8AC270);
         }
     }
 
