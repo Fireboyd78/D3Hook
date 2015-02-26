@@ -1,7 +1,5 @@
 #include "IDirect3DDevice9Hook.h"
 
-#define DEVICE pD3DDevice
-
 /*** IUnknown methods ***/
 STDCALL(IDirect3DDevice9Hook::QueryInterface)(THIS_ REFIID riid, void** ppvObj){
     return DEVICE->QueryInterface(riid, ppvObj);

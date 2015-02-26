@@ -1,10 +1,5 @@
 #pragma once
-
-#include "main.h"
-
-//extern CDriv3r             *pDriv3r;
-extern IDirect3D9          *pD3D;
-extern IDirect3DDevice9    *pD3DDevice;
+#include "d3dhook.h"
 
 struct IDirect3D9Hook : public IDirect3D9
 {

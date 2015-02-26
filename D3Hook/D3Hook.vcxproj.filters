@@ -2,9 +2,6 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClInclude Include="main.h" />
-    <ClInclude Include="address.h">
-      <Filter>game</Filter>
-    </ClInclude>
     <ClInclude Include="driv3r.h">
       <Filter>game</Filter>
     </ClInclude>
@@ -15,6 +12,9 @@
       <Filter>d3d</Filter>
     </ClInclude>
     <ClInclude Include="util.h" />
+    <ClInclude Include="hook.h" />
+    <ClInclude Include="common.h" />
+    <ClInclude Include="d3dhook.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

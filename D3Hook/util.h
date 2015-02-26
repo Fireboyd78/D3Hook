@@ -1,4 +1,10 @@
+///
+/// Useful preprocessor directives
+///
+
 #pragma once
+#define FASTCALL(method)        void __fastcall method
+#define FASTCALL_(type,method)  type __fastcall method
 
 #define STDCALL(method)         HRESULT STDMETHODCALLTYPE method
 #define STDCALL_(type,method)   type STDMETHODCALLTYPE method

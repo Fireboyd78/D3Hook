@@ -59,6 +59,9 @@
       <FloatingPointModel>Fast</FloatingPointModel>
       <EnableEnhancedInstructionSet>NoExtensions</EnableEnhancedInstructionSet>
       <StringPooling>true</StringPooling>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <MinimalRebuild>false</MinimalRebuild>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -81,6 +84,8 @@
       <FloatingPointModel>Fast</FloatingPointModel>
       <EnableEnhancedInstructionSet>NoExtensions</EnableEnhancedInstructionSet>
       <StringPooling>true</StringPooling>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -90,8 +95,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="address.h" />
+    <ClInclude Include="common.h" />
+    <ClInclude Include="d3dhook.h" />
     <ClInclude Include="driv3r.h" />
+    <ClInclude Include="hook.h" />
     <ClInclude Include="IDirect3D9Hook.h" />
     <ClInclude Include="IDirect3DDevice9Hook.h" />
     <ClInclude Include="main.h" />

@@ -8,9 +8,6 @@ IDirect3DDevice9        *pD3DDevice;
 IDirect3D9Hook          *pD3DHook;
 IDirect3DDevice9Hook    *pD3DDeviceHook;
 
-IVTableHook             *pInputHook;
-IVTableHook             *pWindowHook;
-
 WNDPROC hProcOld;
 LRESULT APIENTRY WndProcNew(HWND, UINT, WPARAM, LPARAM);
 
@@ -264,27 +261,6 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 */
 #pragma endregion
 
-NAKED void __fastcall HOOK_ThisCall(DWORD dwAddress, DWORD dwOffset)
-{
-    __asm {
-        mov ecx, __DWPTR_DS(ecx)
-        mov esi, [ecx]
-
-        call __DWPTR(esi + edx)
-        retn
-    }
-}
-
-NAKED LPVOID __fastcall HOOK_GetProcAddress(LPVOID lpVt, DWORD dwOffset)
-{
-    __asm {
-        mov eax, [eax]
-        add eax, edx
-
-        retn
-    }
-}
-
 LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     const DWORD *ptr = _PTR(0x8AC278);
@@ -306,7 +282,7 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             //    call __DWPTR(esi + 80h)
             //}
 
-            HOOK_ThisCall(0x8AC238, 0x80);
+            hook::ThisCall(0x8AC238, 0x80);
 
             return 0;
         }
@@ -315,16 +291,14 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         {
             if (*(bool*)0x8AFA44)
             {
-                //int xPos = GET_X_LPARAM(lParam);
-                //int yPos = GET_Y_LPARAM(lParam);
+                int xPos = GET_X_LPARAM(lParam);
+                int yPos = GET_Y_LPARAM(lParam);
 
-                POINTS wndPos = MAKEPOINTS(lParam);
-                
                 float *wndX = (float*)(*ptr + 0x14);
                 float *wndY = (float*)(*ptr + 0x18);
-
-                *wndX = (float)wndPos.x;
-                *wndY = (float)wndPos.y;
+                
+                *wndX = (float)xPos;
+                *wndY = (float)yPos;
 
                 //__asm {
                 //    fild xPos
@@ -346,9 +320,9 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     push [wndX]
                 }
 
-                HOOK_ThisCall(0x8AC238, 0x84);
+                hook::ThisCall(0x8AC238, 0x84);
 
-                char buf[255]; // 'window_size %d %d'
+                char buf[20]; // 'window_size %d %d'
 
                 _snprintf(buf, sizeof(buf), (char*)(0x78C4C0), xPos, yPos);
                 OutputDebugStringA(buf);
@@ -358,13 +332,14 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     push eax
                 
                     //mov ecx, __DWPTR_DS(0x8AC268)
-                    //mov edx, [ecx]
+                    //mov esi, [ecx]
                     //
-                    //// send it off to the message pump!
-                    //call __DWPTR(edx + 10h)
+                    
+                    //call __DWPTR(esi + 10h)
                 }
 
-                HOOK_ThisCall(0x8AC268, 0x10);
+                // send it off to the message handler
+                hook::ThisCall(0x8AC268, 0x10);
             }
 
             return 0;
@@ -387,6 +362,14 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         case WM_MOUSEWHEEL:
         {
+            /*
+            wParam
+                LOWORD: Indicates whether various virtual keys are down.
+                HIWORD: Indicicates the distance the wheel is rotated.
+            lParam
+                Cursor coordinates relative to upper-left of scren
+            */
+
             int xPos = GET_X_LPARAM(lParam);
             int yPos = GET_Y_LPARAM(lParam);
 
@@ -420,7 +403,7 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 //call __DWPTR(esi + 48h);
             }
 
-            HOOK_ThisCall(0x8AC270, 0x48);
+            hook::ThisCall(0x8AC270, 0x48);
 
             return 0;
         }
@@ -488,14 +471,23 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             }
             */
 
-            LPVOID proc = pInputHook->GetMemberAddress(0x20 + ((uMsg - WM_LBUTTONDOWN) * 4));
-
-            ((void(__thiscall *)(THIS_ void*, int, int, POINTFLOAT))proc)(pInputHook, w1, w2, pos);
+            //LPVOID proc = pInputHook->GetMemberAddress(0x20 + ((uMsg - WM_LBUTTONDOWN) * 4));
+            //
+            //((void(__thiscall *)(THIS_ void*, int, int, POINTFLOAT))proc)(pInputHook, w1, w2, pos);
             return 0;
         }
 
         case WM_MOUSEMOVE:
         {
+            /*
+            wParam
+                LOWORD: Indicates whether various virtual keys are down.
+                HIWORD: Unused.
+            lParam
+                LOWORD: The x-coordinate of the pointer, relative to the upper-left corner of the screen.
+                HIWORD: The y-coordinate of the pointer, relative to the upper-left corner of the screen.
+            */
+
             int xPos = GET_X_LPARAM(lParam);
             int yPos = GET_Y_LPARAM(lParam);
 
@@ -512,6 +504,7 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 int w1 = (wParam >> 2) & 1;
                 int w2 = (wParam >> 3) & 1;
 
+                
                 __asm {
                     fild xPos
                     fdiv [wndX]
@@ -567,7 +560,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
             //LOG("pDriv3r->SetD3DDevice");
             //pDriv3r->SetD3DDevice(pD3DDeviceHook);
 
-            pInputHook = new IVTableHook(0x8AC270);
+            //pInputHook = new IVTableHook(0x8AC270);
         }
     }
 
