@@ -3,6 +3,7 @@ Driv3r Hook
 
 A simple DLL-injection module for hooking into Driv3r, allowing for further control of the game. <sup>([Sound familiar?](https://github.com/Fireboyd78/MM2Hook))</sup>
 
+## Quick rundown
 It's been hiding away on my computer for the last 4 years, not doing much of anything, but here it is!
 
 Recently, I've gotten it working and doing some exciting things! I just need to get around to documenting everything...eventually!
