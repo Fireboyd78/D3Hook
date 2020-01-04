@@ -137,7 +137,7 @@ copy "$(TargetDir)$(TargetName).pdb" "$(DI8TargetDir)$(DI8TargetName).pdb"</Comm
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="CVehicle.cpp" />
+    <ClCompile Include="src\CVehicle.cpp" />
     <ClCompile Include="src\fiero.cpp" />
     <ClCompile Include="src\IDirect3D9Hook.cpp" />
     <ClCompile Include="src\IDirect3DDevice9Hook.cpp" />

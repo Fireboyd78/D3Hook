@@ -28,9 +28,6 @@
     <ClCompile Include="src\hamster.cpp">
       <Filter>Source files\hamster</Filter>
     </ClCompile>
-    <ClCompile Include="CVehicle.cpp">
-      <Filter>Source files\driv3r</Filter>
-    </ClCompile>
     <ClCompile Include="src\VehicleManager.cpp">
       <Filter>Source files\driv3r</Filter>
     </ClCompile>
@@ -39,6 +36,9 @@
     </ClCompile>
     <ClCompile Include="src\patch.cpp" />
     <ClCompile Include="src\fiero.cpp" />
+    <ClCompile Include="src\CVehicle.cpp">
+      <Filter>Source files\driv3r</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source files">
