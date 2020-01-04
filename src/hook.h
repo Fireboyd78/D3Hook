@@ -11,31 +11,23 @@
 
 #define HOOK_PTR pBase
 
-//
-// Description:
-//  A template used for hooking into virtual table pointers without overriding the original data.
-//  Classes that inherit from IAutoHook will also inherit from the base class.
-//  The default constructor will create a pointer to the original data, allowing access to base methods.
-//
-// Params:
-//  TBase - The base type that is being hooked into.
-//
-template<typename TBase>
-struct IAutoHook : public TBase {
-protected:
-    TBase *HOOK_PTR;
-public:
-    IAutoHook(TBase *lpBase) {
-        HOOK_PTR = lpBase;
+struct AutoHook
+{
+    template <typename TBase>
+    struct Type : public TBase {
+        friend AutoHook;
+    protected:
+        static TBase *pBase;
+    };
+
+    template <class THook, class TBase>
+    static THook* Create(TBase *pBase) {
+        auto lf = new THook();
+        lf->pBase = pBase;
+
+        return lf;
     };
 };
-
-#define BEGIN_HOOK_TABLE(name,base) \
-struct name : public IAutoHook<base> { \
-public: \
-	name(base *lpBase) : IAutoHook(lpBase) {};
-
-#define END_HOOK_TABLE() };
 
 template<typename TRet = void, typename ...TArgs>
 struct FnHook {
@@ -59,7 +51,7 @@ public:
     };
 
     template<class TThis>
-    FORCEINLINE TRet operator()(TThis &This, TArgs ...args) const {
+    FORCEINLINE TRet operator()(const TThis *This, TArgs ...args) const {
         return (*(TRet(__thiscall *)(_THIS_ TArgs...))lpFunc)((LPVOID)This, args...);
     };
 

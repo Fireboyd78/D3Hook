@@ -4,12 +4,17 @@
 // Debugging utilities
 //
 
+void debug(const char *lpOutputStr) {
+    OutputDebugStringA(lpOutputStr);
+};
+
 void debugf(const char *format, ...) {
     char buf[255];
     va_list va;
     va_start(va, format);
     _vsnprintf(buf, sizeof(buf), format, va);
     va_end(va);
+
     OutputDebugStringA(buf);
 }
 
@@ -17,24 +22,16 @@ void debugf(const char *format, ...) {
 // Empty function templates
 //
 
-NAKED void NullSub(void) {
-    __asm {
-        retn
-    }
+void ReturnVoid(void) {
+    return;
 };
 
-NAKED int ReturnNullOrZero(void) {
-    __asm {
-        xor eax, eax
-        retn
-    }
+int ReturnNullOrZero(void) {
+    return 0;
 };
 
-NAKED bool ReturnFalse(void) {
-    __asm {
-        xor al, al
-        retn
-    }
+bool ReturnFalse(void) {
+    return false;
 };
 
 //
@@ -73,3 +70,23 @@ bool GetHookProcAddress(HMODULE hModule, LPCSTR lpProcName, FARPROC *out)
         return false;
     }
 };
+
+bool GetPathSpec(char *path, char *dest, int destLen) {
+    char ch;
+    int idx = 0, len = 0;
+
+    if ((path != NULL) && (dest != NULL))
+    {
+        while ((ch = path[idx++]) != NULL) {
+            if (ch == '\\')
+                len = idx;
+        }
+
+        if (len < destLen) {
+            strncpy(dest, path, len);
+            return true;
+        }
+    }
+
+    return false;
+}

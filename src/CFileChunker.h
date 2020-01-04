@@ -25,13 +25,8 @@
 [x] CFileChunker::GetChunkData(uint,void *,CHUNKCOPYTYPE)             .text 005BBE60 00000143 00004048 0000000C
 */
 
-namespace FileChunkerHookSystem
-{
-    int Initialize(int gameVersion);
-};
-
-class CFileChunkerHook {
-private:
+class CFileChunker {
+protected:
     LPVOID lpVtbl;
 
     CHUNKHEADER chunks[272];
@@ -42,8 +37,9 @@ private:
 
     BYTE fileData[0x18];
 public:
-    NOTHROW CFileChunkerHook();
-    NOTHROW ~CFileChunkerHook();
+    NOTHROW CFileChunker();
+    NOTHROW ~CFileChunker();
+
     INT GetChunkCount(void) const;
     UINT GetChunkContext(UINT index) const;
     void SetChunkContext(UINT index, UINT value);
@@ -56,7 +52,7 @@ public:
     UINT AddChunk(LPVOID buffer, UINT size, CHUNKCOPYTYPE copyType, UINT alignment);
     bool ReadFileChunkData(FILECHUNKIO *fileChunk, INT copyType);
     BOOL IsBusy(void) const;
-    BOOL LoadChunks(LPCSTR fileName);
+    BOOL OpenChunks(LPCSTR fileName);
     void CloseChunks(void);
     void Release(void);
 };

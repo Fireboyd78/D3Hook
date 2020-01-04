@@ -3,6 +3,7 @@
 
 #include "d3dhook.h"
 #include "hook.h"
+#include "util.h"
 
 //
 // Hamster shared resources
@@ -12,6 +13,103 @@
 #include "FileChunker.h"
 #include "IUserCommandProxy.h"
 
+enum HA_SOBJ_TYPE;
+
+enum HA_ADDR_TYPE {
+    HA_ADDR_WINDOW,
+    HA_ADDR_VIEWPORT,
+
+    HA_ADDR_DIRECT3D,
+    HA_ADDR_DIRECT3D_DEVICE,
+
+    /**** END OF DATA ****/
+    HA_ADDR_COUNT,
+};
+
+namespace hamster {
+    template <typename TValuePtr = void, typename TValue = intptr_t>
+    class CAutoPtr {
+    protected:
+        using TAutoPtr = CAutoPtr<TValuePtr, TValue>;
+        using ValuePtr_t = TValuePtr *;
+
+        union {
+            ValuePtr_t value_ptr;
+            TValue value;
+        };
+    public:
+        constexpr CAutoPtr(const std::nullptr_t &ptr)
+            : value(0) {}
+
+        constexpr CAutoPtr(TValue ptr)
+            : value(ptr) {}
+
+        constexpr CAutoPtr(ValuePtr_t ptr)
+            : value_ptr(ptr) {}
+
+        constexpr TValue get() {
+            return value;
+        }
+
+        constexpr ValuePtr_t ptr() {
+            return value_ptr;
+        }
+
+        constexpr operator TValue() const                           { return value; }
+        constexpr operator ValuePtr_t() const                       { return value_ptr; }
+
+        constexpr TAutoPtr & operator+(TAutoPtr &rhs) const         { return TAutoPtr(value + rhs.value); }
+        constexpr TAutoPtr & operator-(TAutoPtr &rhs) const         { return TAutoPtr(value - rhs.value); }
+        constexpr TAutoPtr & operator*(TAutoPtr &rhs) const         { return TAutoPtr(value * rhs.value); }
+        constexpr TAutoPtr & operator/(TAutoPtr &rhs) const         { return TAutoPtr(value / rhs.value); }
+
+        // ???
+        constexpr TAutoPtr & operator=(ValuePtr_t value_ptr) {
+            this->value_ptr = value_ptr;
+            return *this;
+        }
+
+        constexpr bool operator==(const std::nullptr_t &rhs) const  { return value == NULL; }
+        constexpr bool operator!=(const std::nullptr_t &rhs) const  { return value != NULL; }
+
+        constexpr bool operator==(const TAutoPtr &rhs) const        { return value == rhs.value; }
+        constexpr bool operator!=(const TAutoPtr &rhs) const        { return value != rhs.value; }
+        constexpr bool operator<(const TAutoPtr &rhs) const         { return value < rhs.value; }
+        constexpr bool operator<=(const TAutoPtr &rhs) const        { return value <= rhs.value; }
+        constexpr bool operator>(const TAutoPtr &rhs) const         { return value > rhs.value; }
+        constexpr bool operator>=(const TAutoPtr &rhs) const        { return value >= rhs.value; }
+    };
+
+    DWORD GetPointer(HA_ADDR_TYPE type);
+    void SetPointer(HA_ADDR_TYPE type, DWORD value);
+
+    DWORD GetSingletonObject(HA_SOBJ_TYPE index);
+    void SetSingletonObject(HA_SOBJ_TYPE index, DWORD ptr);
+
+    DWORD GetSingletonObjectsPointer(void);
+
+    template <typename TType>
+    constexpr inline TType GetPointer(HA_ADDR_TYPE type) {
+        return reinterpret_cast<TType>(GetPointer(type));
+    }
+
+    template <typename TType>
+    constexpr inline void SetPointer(HA_ADDR_TYPE type, TType *value) {
+        return SetPointer(type, (DWORD)value);
+    }
+
+    template <typename TType>
+    constexpr inline TType GetSingletonObject(HA_SOBJ_TYPE index) {
+        return reinterpret_cast<TType>(GetSingletonObject(index));
+    }
+
+    template <typename TType>
+    constexpr inline void SetSingletonObject(HA_SOBJ_TYPE index, TType *value) {
+        SetSingletonObject(index, (DWORD)value);
+    }
+}
+
+#ifdef USE_OLD_HAMSTER_SHIT
 enum HA_ADDR_TYPE {
     HA_ADDR_HWND,
 
@@ -63,7 +161,7 @@ protected:
         m_sobjs_offset = (DWORD*)m_offsets[HA_ADDR_SINGLETON_OBJECTS];
 
         // temp. hack cuz lazy
-        //for (int i = 0; i < D3_SOBJ_COUNT; i++)
+        //for (int i = 0; i < SOBJ_COUNT; i++)
         //    LogFile::Format("D3_SOBJ[%04d] -> %04X\n", i, (((i * 4) + i) * 4));
     };
 
@@ -110,3 +208,4 @@ public:
     NO_INL bool SetD3D(IDirect3D9 *pD3d)                                { return SetPointer(HA_ADDR_IDIRECT3D9, pD3d); };
     NO_INL bool SetD3DDevice(IDirect3DDevice9 *pD3dDevice)              { return SetPointer(HA_ADDR_IDIRECT3DDEVICE9, pD3dDevice); };
 };
+#endif

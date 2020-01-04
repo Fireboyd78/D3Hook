@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -14,6 +14,7 @@
     <ProjectGuid>{B69EAEA5-0C1D-4023-94A4-888BFE9C1FE6}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>D3Hook</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.10240.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <!-- Global configuration settings -->
@@ -30,11 +31,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <UseDebugLibraries>true</UseDebugLibraries>
     <WholeProgramOptimization>false</WholeProgramOptimization>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <!-- Release configuration settings -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
@@ -82,7 +85,7 @@
       <CreateHotpatchableImage>false</CreateHotpatchableImage>
       <AssemblerOutput>AssemblyAndSourceCode</AssemblerOutput>
       <AssemblerListingLocation>$(OutDir)asm\</AssemblerListingLocation>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -117,6 +120,7 @@ copy "$(TargetDir)$(TargetName).pdb" "$(DI8TargetDir)$(DI8TargetName).pdb"</Comm
       <WarningLevel>Level3</WarningLevel>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
     <Link />
   </ItemDefinitionGroup>
@@ -133,6 +137,8 @@ copy "$(TargetDir)$(TargetName).pdb" "$(DI8TargetDir)$(DI8TargetName).pdb"</Comm
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CVehicle.cpp" />
+    <ClCompile Include="src\fiero.cpp" />
     <ClCompile Include="src\IDirect3D9Hook.cpp" />
     <ClCompile Include="src\IDirect3DDevice9Hook.cpp" />
     <ClCompile Include="src\driv3r.cpp" />
@@ -143,10 +149,15 @@ copy "$(TargetDir)$(TargetName).pdb" "$(DI8TargetDir)$(DI8TargetName).pdb"</Comm
     <ClCompile Include="src\main.cpp">
       <CompileAsManaged>false</CompileAsManaged>
     </ClCompile>
+    <ClCompile Include="src\patch.cpp" />
+    <ClCompile Include="src\renderer.cpp" />
     <ClCompile Include="src\util.cpp" />
+    <ClCompile Include="src\VehicleManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\common.h" />
+    <ClInclude Include="src\CVehicle.h" />
+    <ClInclude Include="src\fiero.h" />
     <ClInclude Include="src\IDirect3D9Hook.h" />
     <ClInclude Include="src\IDirect3DDevice9Hook.h" />
     <ClInclude Include="src\d3dhook.h" />
@@ -156,12 +167,16 @@ copy "$(TargetDir)$(TargetName).pdb" "$(DI8TargetDir)$(DI8TargetName).pdb"</Comm
     <ClInclude Include="src\FileChunker.h" />
     <ClInclude Include="src\IUserCommandProxy.h" />
     <ClInclude Include="src\hamster.h" />
+    <ClInclude Include="src\patch.h" />
+    <ClInclude Include="src\renderer.h" />
     <ClInclude Include="src\types.h" />
     <ClInclude Include="src\hook.h" />
     <ClInclude Include="src\hooksystem.h" />
     <ClInclude Include="src\logfile.h" />
     <ClInclude Include="src\main.h" />
     <ClInclude Include="src\util.h" />
+    <ClInclude Include="src\Vehicles_Common.h" />
+    <ClInclude Include="src\VehicleManager.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
@@ -177,11 +192,9 @@ copy "$(TargetDir)$(TargetName).pdb" "$(DI8TargetDir)$(DI8TargetName).pdb"</Comm
       <TargetFiles Include="$(TargetPath);$(TargetPath_PDB)" />
     </ItemGroup>
     <Error Text="Couldn't find compiled DLL/PDB files!" Condition="'@(TargetFiles)' == ''" />
-    
     <Message Text="Creating DirectInput8 DLL/PDB files:" Importance="high" />
-    <Copy SourceFiles="@(TargetFiles)"
-          DestinationFiles="@(TargetFiles->'$(DI8TargetDir)$(DI8TargetName)%(Extension)')">
-        <Output ItemName="Changed" TaskParameter="CopiedFiles" />
+    <Copy SourceFiles="@(TargetFiles)" DestinationFiles="@(TargetFiles->'$(DI8TargetDir)$(DI8TargetName)%(Extension)')">
+      <Output ItemName="Changed" TaskParameter="CopiedFiles" />
     </Copy>
     <Message Text="  - %(Changed.Identity)" Importance="high" />
   </Target>

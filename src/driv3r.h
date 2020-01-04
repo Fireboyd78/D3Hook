@@ -34,44 +34,78 @@ const RSDSEntry g_rsds_info[D3_NUM_DEFINED_VERSIONS] = {
     { 0x785224, __DRIV3R_DEMO, 1.00, false, _GUID_DRIV3R_DEMO, 1, "Z:\\Projects\\Driver3\\Dev\\Driver3\\Win32\\Demo_Master\\Driver3.pdb" },
 };
 
-/* Singleton object types */
-enum D3_SOBJ_TYPE {
-    D3_SOBJ_FILESYSTEM                  = 0,
-    D3_SOBJ_RENDERER                    = 2,
-    D3_SOBJ_SYSTEMCONFIG                = 6,
-    D3_SOBJ_TEXTMANAGER                 = 8,
-    D3_SOBJ_FONTMANAGER                 = 9,
-    D3_SOBJ_USERCOMMANDPROXY            = 14,
-    D3_SOBJ_MOUSECONTROL                = 16,
-    D3_SOBJ_LIFE_NODE_COLLECTION        = 39,
-    D3_SOBJ_STRING_COLLECTION           = 40,
-    D3_SOBJ_LIFE_NODE_COLLECTION_128    = 41,
-    D3_SOBJ_WIRE_COLLECTION_MANAGER     = 42,
-    D3_SOBJ_LIFE_NODE_PROPERTY_STREAM   = 43,
-    D3_SOBJ_SCRIPT_COUNTER_COLLECTION   = 44,
-    D3_SOBJ_LIFE_NODE_FACTORY           = 47,
-    D3_SOBJ_LIFE_ACTOR_FACTORY          = 48,
-    D3_SOBJ_LIFE_ACTOR_PROPERTY_STREAM  = 49,
-    D3_SOBJ_LIFE_ACTOR_COLLECTION       = 50,
-    D3_SOBJ_SOUNDBANK_COLLECTION        = 51,
-    D3_SOBJ_VEHICLE_SPEC_MANAGER        = 80,
-    D3_SOBJ_INITIALISATION_DATA         = 95,
-    D3_SOBJ_MENU_MANAGER                = 96,
-    D3_SOBJ_GAMEMENU_LINK               = 97,
-    D3_SOBJ_PROFILE_SETTINGS            = 215,
-
-    /* Number of singleton objects */
-    D3_SOBJ_COUNT                       = 230
+struct addr_info {
+    intptr_t offsets[D3_NUM_SUPPORTED_VERSIONS];
+    const char *name;
 };
 
-struct D3_ADDR_DATA {
-    HA_ADDR_TYPE type;
-    DWORD offsets[D3_NUM_SUPPORTED_VERSIONS];
-    LPCSTR name;
+intptr_t addressof(addr_info &info);
 
-    HA_ADDR_DATA GetAddressData(int gameVersion) const {
-        return { type, offsets[gameVersion], name };
-    };
+/*
+Dear Patch 2:
+
+    YOU SUCK.
+    
+    A lot.
+    
+    Fuck you.
+*/
+#define HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS() \
+    LogFile::WriteLine(" - Sorry, Patch 2 is too much of a fucking mess for this.")
+
+/* Singleton object types */
+enum HA_SOBJ_TYPE {
+    SOBJ_FILESYSTEM                         = 0,
+    SOBJ_RENDERER                           = 2,
+    SOBJ_OCCLUDER_MANAGER                   = 5,
+    SOBJ_SYSTEMCONFIG                       = 6,
+    SOBJ_TEXTMANAGER                        = 8,
+    SOBJ_FONTMANAGER                        = 9,
+
+    SOBJ_FRAMEWORK                          = 10,
+
+    SOBJ_USERCOMMANDPROXY                   = 14,
+    SOBJ_MOUSECONTROL                       = 16,
+    
+    SOBJ_SOUND                              = 32,
+    SOBJ_MUSIC                              = 33,
+    SOBJ_LIFE_NODE_COLLECTION               = 39,
+    
+    SOBJ_STRING_COLLECTION                  = 40,
+    SOBJ_ACTIVE_NODE_COLLECTION             = 41,
+    SOBJ_WIRE_COLLECTION_MANAGER            = 42,
+    SOBJ_LIFE_NODE_PROPERTY_STREAM          = 43,
+    SOBJ_SCRIPT_COUNTER_COLLECTION          = 44,
+    SOBJ_ACTIVE_NODE_COLLECTION_MANAGER     = 46,
+    SOBJ_LIFE_NODE_FACTORY                  = 47,
+    SOBJ_LIFE_ACTOR_FACTORY                 = 48,
+    SOBJ_LIFE_ACTOR_PROPERTY_STREAM         = 49,
+    
+    SOBJ_LIFE_ACTOR_COLLECTION              = 50,
+    SOBJ_SOUNDBANK_COLLECTION               = 51,
+
+    SOBJ_GAME                               = 55,
+    
+    SOBJ_VEHICLE_SPEC_MANAGER               = 80,
+    SOBJ_VO3MANAGER                         = 81,
+    SOBJ_DRIVE_TYPE_LOOKUP                  = 89,
+    
+    SOBJ_CITY_SPOOL_BUFFER                  = 94,
+    SOBJ_INITIALISATION_DATA                = 95,
+    SOBJ_MENU_MANAGER                       = 96,
+    SOBJ_GAMEMENU_LINK                      = 97,
+    SOBJ_MENU_SOUND                         = 98,
+
+    SOBJ_VEHICLE_MANAGER                    = 139,
+
+    SOBJ_VEHICLE_SOUND_SPEC_MANAGER         = 153,
+
+    SOBJ_PROFILE_SETTINGS                   = 215,
+    SOBJ_FRONTEND_MUSIC                     = 217,
+    SOBJ_GENERIC_STRING_MANAGER             = 218,
+
+    /* Number of singleton objects */
+    SOBJ_COUNT                              = 230
 };
 
 /*
@@ -97,11 +131,11 @@ struct D3_ADDR_DATA {
 #endif
 */
 
-class CDriv3r : public CHamsterGame {
+class CDriv3r {
 public:
     CDriv3r(int gameVersion);
 
-    NO_INL static bool GetGameInfo(RSDSEntry &ppGameInfo) {
+    static bool GetGameInfo(RSDSEntry &ppGameInfo) {
         for (auto entry : g_rsds_info)
         {
             auto rsds = (LPRSDS_DATA)(DWORD*)entry.offset;
@@ -115,6 +149,16 @@ public:
         return false;
     };
 
-    NO_INL IUserCommandProxy* GetUserCommandProxy(void)                 { return GetSingletonPointer<IUserCommandProxy*>(D3_SOBJ_USERCOMMANDPROXY); };
-    NO_INL bool SetUserCommandProxy(IUserCommandProxy *pUserCmdProxy)   { return SetSingletonPointer(D3_SOBJ_USERCOMMANDPROXY, pUserCmdProxy); };
+    static int Version();
+
+    HWND GetMainWindow(void)                                    { return hamster::GetPointer<HWND>(HA_ADDR_WINDOW); };
+
+    IDirect3D9* GetD3D(void)                                    { return hamster::GetPointer<IDirect3D9*>(HA_ADDR_DIRECT3D); };
+    void SetD3D(IDirect3D9 *pD3d)                               { return hamster::SetPointer(HA_ADDR_DIRECT3D, pD3d); };
+
+    IDirect3DDevice9* GetD3DDevice(void)                        { return hamster::GetPointer<IDirect3DDevice9*>(HA_ADDR_DIRECT3D_DEVICE); };
+    void SetD3DDevice(IDirect3DDevice9 *pD3dDevice)             { hamster::SetPointer(HA_ADDR_DIRECT3D_DEVICE, pD3dDevice); };
+
+    IUserCommandProxy* GetUserCommandProxy(void)                { return hamster::GetSingletonObject<IUserCommandProxy*>(SOBJ_USERCOMMANDPROXY); };
+    void SetUserCommandProxy(IUserCommandProxy *pUserCmdProxy)  { hamster::SetSingletonObject(SOBJ_USERCOMMANDPROXY, pUserCmdProxy); };
 };

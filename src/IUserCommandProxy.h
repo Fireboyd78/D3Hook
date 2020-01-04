@@ -1,51 +1,62 @@
 #pragma once
 #include "hook.h"
 
-typedef struct IUserCommand {
+class IUserCommand {
 public:
 	virtual void ProcessCommand(const char *command, const char *parameters) PURE;
-} *LPUserCommand;
+};
 
-typedef struct IUserCommandProxy {
+class IUserCommandProxy {
 public:
-    virtual int Release(bool) PURE;
+    virtual int ˜dtor(bool) PURE;
+
     virtual void Initialise(void) PURE;
-    virtual void RegisterCommand(LPUserCommand) PURE;
-    virtual void UnregisterCommand(LPUserCommand) PURE;
-    virtual void IssueCommand(const char *, LPUserCommand) PURE;
-} *LPUserCommandProxy;
+    virtual void RegisterCommand(IUserCommand *) PURE;
+    virtual void UnregisterCommand(IUserCommand *) PURE;
+    virtual void IssueCommand(const char *, IUserCommand *) PURE;
+};
 
-BEGIN_HOOK_TABLE( IUserCommandProxyHook,
-			      IUserCommandProxy )
-
-    int IUserCommandProxy::Release(bool free) {
-        //LOG("[IUserCommandProxy::Release]");
-        return HOOK_PTR->Release(free);
+class IUserCommandProxyHook : public AutoHook::Type<IUserCommandProxy> {
+public:
+    int IUserCommandProxy::˜dtor(bool free) {
+#ifdef USERCMDPROXY_DEBUGGING
+        LOG("[IUserCommandProxy::Release]");
+#endif
+        return pBase->˜dtor(free);
     };
 
     void IUserCommandProxy::Initialise(void) {
-        //LOG("[IUserCommandProxy::Initialise]");
-        HOOK_PTR->Initialise();
+#ifdef USERCMDPROXY_DEBUGGING
+        LOG("[IUserCommandProxy::Initialise]");
+#endif
+        pBase->Initialise();
     };
 
-    void IUserCommandProxy::RegisterCommand(LPUserCommand userCmd) {
-        //DWORD retAddr = *(DWORD*)(&userCmd - 1);
-        //dprintf("[IUserCommandProxy::RegisterCommand] (return:0x%X)", retAddr);
-        HOOK_PTR->RegisterCommand(userCmd);
+    void IUserCommandProxy::RegisterCommand(IUserCommand *userCmd) {
+#ifdef USERCMDPROXY_DEBUGGING
+        DWORD retAddr = *(DWORD*)(&userCmd - 1);
+        LogFile::Format("[IUserCommandProxy::RegisterCommand] (return:0x%X)\n", retAddr);
+#endif
+        pBase->RegisterCommand(userCmd);
     };
 
-    void IUserCommandProxy::UnregisterCommand(LPUserCommand userCmd) {
-        //DWORD retAddr = *(DWORD*)(&userCmd - 1);
-        //dprintf("[IUserCommandProxy::UnegisterCommand] (return:0x%X)", retAddr);
-        HOOK_PTR->UnregisterCommand(userCmd);
+    void IUserCommandProxy::UnregisterCommand(IUserCommand *userCmd) {
+#ifdef USERCMDPROXY_DEBUGGING
+        DWORD retAddr = *(DWORD*)(&userCmd - 1);
+        LogFile::Format("[IUserCommandProxy::UnegisterCommand] (return:0x%X)\n", retAddr);
+#endif
+        pBase->UnregisterCommand(userCmd);
     };
 
-    void IUserCommandProxy::IssueCommand(const char *command, LPUserCommand userCmd) {
-        //if (strlen(command) > 0) {
-        //    DWORD retAddr = *(DWORD*)(&command - 1);
-        //    debugf("[IUserCommandProxy::IssueCommand] -> \"%s\", 0x%X (return:0x%X)\n", command, userCmd, retAddr);
-        //}
-        HOOK_PTR->IssueCommand(command, userCmd);
+    void IUserCommandProxy::IssueCommand(const char *command, IUserCommand *userCmd) {
+#ifdef USERCMDPROXY_DEBUGGING
+        if (strlen(command) > 0) {
+            DWORD retAddr = *(DWORD*)(&command - 1);
+            debugf("[IUserCommandProxy::IssueCommand] -> \"%s\", 0x%X (return:0x%X)\n", command, userCmd, retAddr);
+        }
+#endif
+        pBase->IssueCommand(command, userCmd);
     };
+};
 
-END_HOOK_TABLE()
+IUserCommandProxy * AutoHook::Type<IUserCommandProxy>::pBase;

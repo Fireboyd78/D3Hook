@@ -28,6 +28,17 @@
     <ClCompile Include="src\hamster.cpp">
       <Filter>Source files\hamster</Filter>
     </ClCompile>
+    <ClCompile Include="CVehicle.cpp">
+      <Filter>Source files\driv3r</Filter>
+    </ClCompile>
+    <ClCompile Include="src\VehicleManager.cpp">
+      <Filter>Source files\driv3r</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer.cpp">
+      <Filter>Source files\driv3r</Filter>
+    </ClCompile>
+    <ClCompile Include="src\patch.cpp" />
+    <ClCompile Include="src\fiero.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source files">
@@ -92,5 +103,19 @@
     <ClInclude Include="src\types.h">
       <Filter>Source files\hamster</Filter>
     </ClInclude>
+    <ClInclude Include="src\CVehicle.h">
+      <Filter>Source files\driv3r</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Vehicles_Common.h">
+      <Filter>Source files\driv3r</Filter>
+    </ClInclude>
+    <ClInclude Include="src\VehicleManager.h">
+      <Filter>Source files\driv3r</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer.h">
+      <Filter>Source files\driv3r</Filter>
+    </ClInclude>
+    <ClInclude Include="src\fiero.h" />
+    <ClInclude Include="src\patch.h" />
   </ItemGroup>
 </Project>

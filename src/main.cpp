@@ -1,5 +1,7 @@
 #include "main.h"
 
+#include <shellapi.h>
+
 CDriv3r                 *pDriv3r = 0;
 
 IDirect3D9              *pD3D;
@@ -13,6 +15,29 @@ IUserCommandProxyHook   *pUserCmdProxyHook;
 
 WNDPROC hProcOld;
 LRESULT APIENTRY WndProcNew(HWND, UINT, WPARAM, LPARAM);
+
+static char gamedir[MAX_PATH]{ NULL };
+
+static int gameversion = 0;
+
+static fxModule gamemodule;
+static fxModule mymodule;
+
+static void InitGameModule(HINSTANCE hInstance) {
+    if (!fxModule::Initialize(gamemodule, hInstance))
+        LogFile::WriteLine("Couldn't initialize the game's module info!");
+}
+
+static void InitPath(void) {
+    char dir[MAX_PATH]{ NULL };
+    auto len = GetModuleFileName(NULL, dir, MAX_PATH);
+
+    if (GetPathSpec(dir, gamedir, len)) {
+        SetCurrentDirectory(gamedir);
+    } else {
+        GetCurrentDirectory(MAX_PATH, gamedir);
+    }
+}
 
 struct _D3_SHADER_INFO {
     UINT32 offset;
@@ -104,10 +129,12 @@ const _D3_SHADER shader_programs[] = {
 LPFNDIRECTINPUT8CREATE lpDI8Create;
 
 // Export as 'DirectInput8Create' so we can hook into Driv3r
-#pragma comment(linker, "/EXPORT:DirectInput8Create=_DirectInput8Create_Impl")
-HRESULT NAKED DirectInput8Create_Impl(HINSTANCE hinst, DWORD dwVersion, REFIID riidltf, LPVOID *ppvOut, LPUNKNOWN punkOuter)
-{
-    _asm jmp DWORD PTR ds:lpDI8Create
+#pragma comment(linker, "/EXPORT:DirectInput8Create=_DirectInput8Create_Impl@20")
+HRESULT WINAPI DirectInput8Create_Impl(HINSTANCE hinst, DWORD dwVersion, REFIID riidltf, LPVOID *ppvOut, LPUNKNOWN punkOuter) {
+    /*
+        Not much to hook here for the moment
+    */
+    return lpDI8Create(hinst, dwVersion, riidltf, ppvOut, punkOuter);
 }
 
 bool SubclassGameWindow(HWND gameWnd, WNDPROC pWndProcNew, WNDPROC *ppWndProcOld)
@@ -124,18 +151,36 @@ bool SubclassGameWindow(HWND gameWnd, WNDPROC pWndProcNew, WNDPROC *ppWndProcOld
     return false;
 };
 
+void HandlePanicButton(DWORD vKey)
+{
+    static int exit_presses = 0;
+
+    if (vKey == VK_OEM_3)
+    {
+        if (++exit_presses == 2)
+        {
+            // ABORT MISSION!!!
+            ExitProcess(EXIT_SUCCESS);
+        }
+    } else {
+        exit_presses = 0;
+    }
+}
+
+static DWORD g_LastKey = 0;
+
 bool HandleKeyPress(DWORD vKey)
 {
+    g_LastKey = vKey;
+
+    HandlePanicButton(vKey);
+
     switch (vKey) {
-        case VK_OEM_3:
-            // close the game!
-            ExitProcess(EXIT_SUCCESS);
-            return true;
         case VK_F5:
         {
             LOG("Testing the file chunker hook...");
             LOG(" - Creating new chunker...");
-            CFileChunkerHook fileChunker = CFileChunkerHook();
+            CFileChunker fileChunker = CFileChunker();
 
             LogFile::Format(" - Chunk count: %d\n", fileChunker.GetChunkCount());
 
@@ -146,11 +191,10 @@ bool HandleKeyPress(DWORD vKey)
         {
             LOG("Dumping shaders...");
 
-            const int gameVersion = pDriv3r->GetGameVersion();
             char shadersDir[MAX_PATH] = { NULL };
-            char *appPath = hook::VTHook(pDriv3r->GetSingletonPointer(D3_SOBJ_SYSTEMCONFIG))[16].Call<char*>();
+            char *appPath = hook::VTHook(hamster::GetSingletonObject(SOBJ_SYSTEMCONFIG))[16].Call<char*>();
 
-            char *shadersVer = (gameVersion == __DRIV3R_V100) ? "v100" : "v120";
+            char *shadersVer = (gameversion == __DRIV3R_V100) ? "v100" : "v120";
 
             sprintf(shadersDir, "%s\\shaders\\%s", appPath, shadersVer);
 
@@ -172,13 +216,13 @@ bool HandleKeyPress(DWORD vKey)
             //--sprintf(chunkerPath, "%s\\AllShaders.chunk", &shadersDir);
             //--
             //--LOG(" - Initializing shader chunker...");
-            //--CFileChunkerHook shaderChunker;
+            //--CFileChunker shaderChunker;
             //--int shaderIndex = 0;
             //--
-            //--for (int i = 0; i < sizeof(CFileChunkerHook); i += 4)
+            //--for (int i = 0; i < sizeof(CFileChunker); i += 4)
             //--    *(DWORD*)((BYTE*)&shaderChunker + i) = 0xDEC015A1;
             //--
-            //--shaderChunker = CFileChunkerHook();
+            //--shaderChunker = CFileChunker();
 
             for (auto out_ : outShaders)
             {
@@ -191,8 +235,8 @@ bool HandleKeyPress(DWORD vKey)
                 {
                     auto shader = out_.shaders[i];
             
-                    auto offset = shader.info[gameVersion].offset;
-                    auto size = shader.info[gameVersion].size;
+                    auto offset = shader.info[gameversion].offset;
+                    auto size = shader.info[gameversion].size;
             
                     // better safe then sorry
                     if (offset == 0 || size == 0)
@@ -308,7 +352,7 @@ bool HandleKeyPress(DWORD vKey)
             //--
             //--FILE *outFile = fopen(chunkerPath, "wb");
             //--
-            //--int outSize = sizeof(CFileChunkerHook);
+            //--int outSize = sizeof(CFileChunker);
             //--
             //--LOG(" - Writing shader chunker to file...");
             //--if (fwrite(&shaderChunker, sizeof(BYTE), outSize, outFile) == outSize)
@@ -322,667 +366,409 @@ bool HandleKeyPress(DWORD vKey)
             //--
             //--fclose(outFile);
             return true;
-        } 
+        }
+        case VK_F8:
+        {
+            auto addr = (DWORD **)hamster::GetSingletonObjectsPointer();
+
+            for (int i = 0; i < SOBJ_COUNT; i++) {
+                auto ptr = &addr[i];
+
+                if (*ptr == nullptr)
+                    continue;
+
+                LogFile::Format("singleton[%02X] @ %08X : %08X -> %08X\n", i, (DWORD)ptr, *ptr, **ptr);
+            }
+
+            return true;
+        }
         case 'v':
         case 'V':
+        {
             D3DVIEWPORT9 pViewport;
 
             if (pD3DDevice->GetViewport(&pViewport) == D3D_OK)
             {
                 pViewport.MinZ = 0.001f;
-                
+
                 if (pD3DDevice->SetViewport(&pViewport) == D3D_OK)
                 {
                     pD3DDevice->Clear(0, NULL, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 0), 0.0f, 0);
                     pD3DDevice->Clear(0, NULL, D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(0, 0, 0), 0.0f, 0);
                 }
             }
-            return true;
+        } break; // no need to handle this completely
     }
 
     return false;
 }
 
-LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-    //const DWORD *ptr = _PTR(0x8AC278);
-
-    //const DWORD *ptr = pDriv3r->GetSingletonObjectPointer(18);
-
-    switch (uMsg) {
-        case WM_DESTROY:
-        {
-            /*
-            wParam
-                This parameter is not used.
-            lParam
-                This parameter is not used.
-            */
-
-            hook::VTHook(pDriv3r->GetSingletonPointer(D3_SOBJ_RENDERER))[32]();
-            return 0;
-        }
-
-        case WM_KEYUP:
-        {
-            if (HandleKeyPress((DWORD)wParam))
-                return 0;
-        } break;
-
-        //case WM_MOVE:
-        //{
-        //    /*
-        //    wParam
-        //        This parameter is not used.
-        //    lParam
-        //        The x and y coordinates of the upper-left corner of the client area of the window.
-        //
-        //        LOWORD: Contains the x-coordinate.
-        //        HIWORD: Contains the y-coordinate.
-        //    */
-        //
-        //    if (*(bool*)((pDriv3r->GetGameVersion() == __DRIV3R_V100) ? 0x8B86F0 : 0x8AFA44))
-        //    {
-        //        int xPos = GET_X_LPARAM(lParam);
-        //        int yPos = GET_Y_LPARAM(lParam);
-        //
-        //        float *wndX = (float*)(*ptr + 0x14);
-        //        float *wndY = (float*)(*ptr + 0x18);
-        //        
-        //        *wndX = (float)xPos;
-        //        *wndY = (float)yPos;
-        //
-        //        __asm {
-        //            push [wndY]
-        //            push [wndX]
-        //        }
-        //
-        //        //hook::ThisCall(0x8AC238, 0x84);
-        //        hook::ThisCall(pDriv3r->GetPointer(D3_SOBJ_RENDERER), 0x84);
-        //
-        //        char buf[20]; // 'window_size %d %d'
-        //        _snprintf(buf, sizeof(buf), "window_size %d %d", xPos, yPos);
-        //
-        //        pUserCmdProxy->IssueCommand(buf, NULL);
-        //    }
-        //
-        //    return 0;
-        //}
-
-        //case WM_SETREDRAW:
-        //    /*
-        //    wParam
-        //        The redraw state. If this parameter is TRUE, the content can be redrawn after a change. If this parameter is FALSE, the content cannot be redrawn after a change.
-        //    lParam
-        //        This parameter is not used.
-        //    */
-        //    return 0;
-
-        //case WM_SETCURSOR:
-        //{
-        //    /*
-        //    wParam
-        //        A handle to the window that contains the cursor.
-        //    lParam
-        //        LOWORD: Specifies the hit-test code.
-        //        HIWORD: Specifies the identifier of the mouse message.
-        //    */
-        //    if ((HWND)wParam == hWnd)
-        //    {
-        //        if (!(*(bool*)(*ptr + 0x8)) && (LOWORD(lParam) == HTCLIENT))
-        //        {
-        //            SetCursor(0);
-        //            return 1;
-        //        }
-        //    }
-        //} goto HANDLE_MSG;
-
-        //case WM_MOUSEWHEEL:
-        //{
-        //    /*
-        //    wParam
-        //        LOWORD: Indicates whether various virtual keys are down.
-        //        HIWORD: Indicates the distance the wheel is rotated.
-        //    lParam
-        //        Cursor coordinates relative to upper-left of screen.
-        //
-        //        LOWORD: Specifies the x-coordinate of the cursor.
-        //        HIWORD: Specifies the y-coordinate of the cursor.
-        //    */
-        //
-        //    int xPos = GET_X_LPARAM(lParam);
-        //    int yPos = GET_Y_LPARAM(lParam);
-        //
-        //    ScreenToClient(hWnd, (POINT*)lParam);
-        //
-        //    float *wndX = (float*)(*ptr + 0x14);
-        //    float *wndY = (float*)(*ptr + 0x18);
-        //
-        //    float x, y;
-        //
-        //    int w1 = (wParam >> 2) & 1;
-        //    int w2 = (wParam >> 3) & 1;
-        //
-        //    __asm {
-        //        fild xPos
-        //        fdiv [wndX]
-        //        fstp x
-        //
-        //        fild yPos
-        //        fdiv [wndY]
-        //        fstp y
-        //
-        //        push y
-        //        push x
-        //        push w2
-        //        push w1
-        //
-        //        //mov ecx, __DWPTR_DS(0x8AC270)
-        //        //mov esi, [ecx]
-        //        //
-        //        //call __DWPTR(esi + 48h);
-        //    }
-        //
-        //    //hook::ThisCall(0x8AC270, 0x48);
-        //    hook::ThisCall(pDriv3r->GetPointer(D3_SOBJ_MOUSECONTROL), 0x48);
-        //
-        //    return 0;
-        //}
-
-        // Handle click events
-        //case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
-        //case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
-        //case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_MBUTTONDBLCLK:
-        //{
-        //    /*
-        //    wParam
-        //        Indicates whether various virtual keys are down.
-        //    lParam
-        //        Cursor coordinates relative to upper-left of screen.
-        //
-        //        LOWORD: Specifies the x-coordinate of the cursor.
-        //        HIWORD: Specifies the y-coordinate of the cursor.
-        //    */
-        //
-        //    int xPos = GET_X_LPARAM(lParam);
-        //    int yPos = GET_Y_LPARAM(lParam);
-        //
-        //    float wndX = *(float*)(*ptr + 0x14);
-        //    float wndY = *(float*)(*ptr + 0x18);
-        //
-        //    float x, y;
-        //
-        //    int w1 = (wParam >> 2) & 1;
-        //    int w2 = (wParam >> 3) & 1;
-        //
-        //    __asm {
-        //        fild xPos
-        //        fdiv [wndX]
-        //        fstp x
-        //
-        //        fild yPos
-        //        fdiv [wndY]
-        //        fstp y
-        //
-        //        push y
-        //        push x
-        //        push w2
-        //        push w1
-        //
-        //        //mov ecx, __DWPTR_DS(0x8AC270)
-        //        //mov esi, [ecx]
-        //
-        //        // ==== CALL VALUES ===============
-        //        // LBUTTONDOWN:    20h < 0  ; 0x201
-        //        // LBUTTONUP:      24h < 1  ; 0x202
-        //        // LBUTTONDBLCLK:  28h < 2  ; 0x203
-        //        // 
-        //        // RBUTTONDOWN:    38h < 3  ; 0x204
-        //        // RBUTTONUP:      3Ch < 4  ; 0x205
-        //        // RBUTTONDBLCLK:  40h < 5  ; 0x206
-        //        //
-        //        // MBUTTONDOWN:    2Ch < 6  ; 0x207
-        //        // MBUTTONUP:      30h < 7  ; 0x208
-        //        // MBUTTONDBLCLK:  34h < 8  ; 0x209
-        //        // ================================
-        //    }
-        //
-        //    hook::ThisCall(pDriv3r->GetPointer(D3_SOBJ_MOUSECONTROL), ((uMsg - WM_LBUTTONDOWN) << 2) + 0x20);
-        //    
-        //    //LPVOID proc = pInputHook->GetMemberAddress(0x20 + ((uMsg - WM_LBUTTONDOWN) * 4));
-        //    //
-        //    //((void(__thiscall *)(THIS_ void*, int, int, POINTFLOAT))proc)(pInputHook, w1, w2, pos);
-        //    return 0;
-        //}
-
-        //case WM_MOUSEMOVE:
-        //{
-        //    /*
-        //    wParam
-        //        LOWORD: Indicates whether various virtual keys are down.
-        //        HIWORD: Unused.
-        //    lParam
-        //        LOWORD: The x-coordinate of the pointer, relative to the upper-left corner of the screen.
-        //        HIWORD: The y-coordinate of the pointer, relative to the upper-left corner of the screen.
-        //    */
-        //
-        //    int xPos = GET_X_LPARAM(lParam);
-        //    int yPos = GET_Y_LPARAM(lParam);
-        //
-        //    int *curX = (int*)(*ptr + 0x0C);
-        //    int *curY = (int*)(*ptr + 0x10);
-        //
-        //    if (xPos != *curX || yPos != *curX)
-        //    {
-        //        float *wndX = (float*)(*ptr + 0x14);
-        //        float *wndY = (float*)(*ptr + 0x18);
-        //
-        //        float x, y;
-        //
-        //        int w1 = (wParam >> 2) & 1;
-        //        int w2 = (wParam >> 3) & 1;
-        //
-        //        __asm {
-        //            fild xPos
-        //            fdiv [wndX]
-        //            fstp x
-        //
-        //            fild yPos
-        //            fdiv [wndY]
-        //            fstp y
-        //
-        //            push y
-        //            push x
-        //            push w2
-        //            push w1
-        //
-        //            //mov ecx, __DWPTR_DS(0x8AC270)
-        //            //mov eax, [ecx]
-        //            //
-        //            //call __DWPTR(eax + 44h)
-        //            //
-        //            //mov curX, ebx
-        //            //mov curY, edi
-        //        }
-        //
-        //        hook::ThisCall(pDriv3r->GetPointer(D3_SOBJ_MOUSECONTROL), 0x44);
-        //
-        //        *curX = xPos;
-        //        *curY = yPos;
-        //
-        //        return 0;
-        //    }
-        //} goto HANDLE_MSG;
-
-        //HANDLE_MSG:
-        //    return DefWindowProc(hWnd, uMsg, wParam, lParam);
-    }
-
-    return CallWindowProc(hProcOld, hWnd, uMsg, wParam, lParam);
-}
-
-void SetupHooks() {
-    bool subclassWindow = true;
-
-    if (subclassWindow)
-    {
-        LogFile::Write("Subclassing window...");
-
-        if (SubclassGameWindow(pDriv3r->GetMainWindowHwnd(), WndProcNew, &hProcOld))
-            LogFile::Write("Done!\n");
-        else
-            LogFile::Write("FAIL!\n");
-    }
-
-    //pD3D = pDriv3r->GetD3D();
-    pD3DDevice = pDriv3r->GetD3DDevice();
-
-    if (pD3DDevice != NULL)
-    {
-        LOG("Successfully retrieved the D3D device pointer!");
-
-        //pD3DDeviceHook = new IDirect3DDevice9Hook;
-        //pDriv3r->SetD3DDevice(pD3DDeviceHook);
-    }
-    else
-    {
-        LOG("Could not retreive the D3D device pointer!");
-    }
-
-    pUserCmdProxy = pDriv3r->GetUserCommandProxy();
-    
-    if (pUserCmdProxy != NULL)
-    {
-        pUserCmdProxyHook = new IUserCommandProxyHook(pUserCmdProxy);
-
-        if (pDriv3r->SetUserCommandProxy(pUserCmdProxyHook))
-        {
-            LOG("Successfully hooked into the user command proxy!");
-        }
-        else
-        {
-            LOG("Could not hook into the user command proxy!");
-        }
-    }
-    else
-    {
-        LOG("Could not retrieve the user command proxy!");
-    }
-
-    LogFile::AppendLine();
-
-    /*
-    if (pDriv3r->GetGameVersion() == __DRIV3R_V120)
-    {
-        LOG("Loading menu from memory...");
-
-        HWND gameHwnd = pDriv3r->GetMainWindowHwnd();
-        HMENU hMenu = LoadMenuIndirect((MENUTEMPLATE*)0x8E6BA0);
-
-        if (hMenu != NULL && IsMenu(hMenu)) {
-            LOG("Successfully loaded menu from memory!");
-
-            //if (SetMenu(gameHwnd, hMenu) != NULL) {
-            //    LOG("Successfully set the menu!");
-            //} else {
-            //    LOG("FAILED to set the menu!");
-            //}
-        }
-        else {
-            LOG("FAILED to load menu from memory!");
-        }
-    }
-    */
-
-    //pD3DHook = new IDirect3D9Hook;
-    //pD3DDeviceHook = new IDirect3DDevice9Hook;
-
-    //pDriv3r->SetD3D((DWORD)pD3DHook);
-    //LOG("pDriv3r->SetD3DDevice");
-    //pDriv3r->SetD3DDevice(pD3DDeviceHook);
-
-    //pInputHook = new IVTableHook(0x8AC270);
-}
-
-void InstallVTHook(DWORD dwHookAddr, DWORD dwNewAddr) {
-    DWORD flOldProtect;
-
-    VirtualProtect((LPVOID)dwHookAddr, 4, PAGE_EXECUTE_READWRITE, &flOldProtect);
-    *(DWORD*)dwHookAddr = dwNewAddr;
-    VirtualProtect((LPVOID)dwHookAddr, 4, flOldProtect, &flOldProtect);
-}
-
-void InstallVTHook(DWORD dwHookAddr, DWORD dwNewAddr, LPDWORD lpdwOldAddr) {
-    *lpdwOldAddr = *(DWORD*)dwHookAddr;
-    InstallVTHook(dwHookAddr, dwNewAddr);
-}
-
-void InstallPatch(DWORD dwAddress, BYTE *patchData, DWORD dwSize) {
-    DWORD flOldProtect;
-
-    VirtualProtect((LPVOID)dwAddress, dwSize, PAGE_EXECUTE_READWRITE, &flOldProtect);
-    memcpy((LPVOID)dwAddress, patchData, dwSize);
-    VirtualProtect((LPVOID)dwAddress, dwSize, flOldProtect, &flOldProtect);
-};
-
-void SetJmpDest(LPVOID patch, DWORD jmpOffset, LPVOID jmpDest, LPDWORD jmpStorage) {
-    *jmpStorage = (DWORD)jmpDest;
-    *(DWORD*)((BYTE*)patch + jmpOffset) = (DWORD)jmpStorage;
-};
-
-// 0x5DE7E0
-BYTE InitShaders_Patch[] = {
-    //0x51,                                 // ??: push ecx
-    0xFF, 0x25, 0xCD, 0xCD, 0xCD, 0xCD,     // 00: jmp [...]
-    //0x59,                                 // ??: pop ecx
-    //0xC3,                                 // ??: retn
-};
-
-/*
-init_shader_thing_1      .text 005DD620 0000008A 00000018 00000010 R . . . . . .
-init_shader_thing_2      .text 005DD6B0 0000008A 00000018 00000010 R . . . . . .
-init_shader_thing_3      .text 005DD740 0000008A 00000018 00000010 R . . . . . .
-init_shader_thing_4      .text 005DD7D0 0000008A 00000018 00000010 R . . . . . .
-init_shader_thing_5      .text 005DD860 0000008A 00000018 00000010 R . . . . . .
-init_shader_thing_6      .text 005DD8F0 0000008A 00000018 00000010 R . . . . . .
-init_shader_thing_7      .text 005DD980 0000008A 00000018 00000010 R . . . . . .
-init_shader_thing_8      .text 005DDA10 0000008A 00000018 00000010 R . . . . . .
-init_shader_thing_9      .text 005DDAA0 00000087 00000018 00000010 R . . . . . .
-init_shader_thing_10     .text 005DDB30 00000087 00000018 00000010 R . . . . . .
-init_global_shader_thing .text 005DE730 000000A4 0000001C 00000008 R . . . . . .
-*/
-
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing1;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing2;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing3;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing4;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing5;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing6;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing7;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing8;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing9;
-FnHook<DWORD,DWORD,DWORD,DWORD,DWORD> lpfnInitShaderThing10;
-FnHook<DWORD,DWORD,DWORD>             lpfnInitGlobalShaderThing;
-
-DWORD lpInitShaders_Hook;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing1;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing2;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing3;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing4;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing5;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing6;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing7;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing8;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing9;
+FnHook<int,DWORD,DWORD,DWORD,LPD3DXEFFECTPOOL>  lpfnInitShaderThing10;
+FnHook<int,DWORD,DWORD>                         lpfnInitGlobalShaderThing;
 
 DWORD gpuShaders[47];
 
+struct SShaderFX {
+    LPD3DXEFFECT pEffect;
+    LPD3DXBUFFER pErrors;
+    LPD3DXEFFECTPOOL pPool;
+    D3DXHANDLE pTechnique;
+};
 
-DWORD InitShader(const LPVOID &This, DWORD type, DWORD index, DWORD offset, DWORD size)
-{
-    DWORD result = 0;
+struct SGlobalModelEffect {
+    int unk_00;
+    int unk_04; // uid?
+    SShaderFX *shaderFX;
+    LPD3DXEFFECTPOOL pEffectPool;
+    int unk_10;
+    int unk_14;
+    int unk_18;
+    int unk_1C;
+};
 
-    if (type == 0)
+struct SModelEffect {
+    SShaderFX *pShader;
+    UINT uid;
+    UINT unk_08;
+    void *pTexture;
+};
+
+class effectManager {
+protected:
+    SGlobalModelEffect *pGlobalEffects[10];
+    size_t nGlobalEffects;
+
+    SModelEffect *pModelEffects[64];
+    size_t nModelEffects;
+};
+
+class effectManagerHandler : public effectManager {
+protected:
+    int InitShader(DWORD type, DWORD index, DWORD offset, DWORD size)
     {
-        result = lpfnInitGlobalShaderThing(This, offset, size);
-        LogFile::Format(" - Initialized global shader (offset: 0x%08X, size: 0x%08X), Result = 0x%08X\n",
-            offset, size, result);
-    }
-    else
-    {
-        DWORD unk = *(DWORD*)((BYTE*)(*(DWORD*)This) + 0xC);
+        int result = 0;
 
-        switch (type)
+        if (type == 0)
         {
-            case 1:
-                result = lpfnInitShaderThing1(This, offset, size, index, unk);
-                break;
-            case 2:
-                result = lpfnInitShaderThing2(This, offset, size, index, unk);
-                break;
-            case 3:
-                result = lpfnInitShaderThing3(This, offset, size, index, unk);
-                break;
-            case 4:
-                result = lpfnInitShaderThing4(This, offset, size, index, unk);
-                break;
-            case 5:
-                result = lpfnInitShaderThing5(This, offset, size, index, unk);
-                break;
-            case 6:
-                result = lpfnInitShaderThing6(This, offset, size, index, unk);
-                break;
-            case 7:
-                result = lpfnInitShaderThing7(This, offset, size, index, unk);
-                break;
-            case 8:
-                result = lpfnInitShaderThing8(This, offset, size, index, unk);
-                break;
-            case 9:
-                result = lpfnInitShaderThing9(This, offset, size, index, unk);
-                break;
-            case 10:
-                result = lpfnInitShaderThing10(This, offset, size, index, unk);
-                break;
-        }
-        LogFile::Format(" - Initialized shader (type: %d, offset: 0x%08X, size: 0x%08X, index: %d, unk: 0x%08X), Result = 0x%08X\n",
-            type, offset, size, index, unk, result);
-    }
-    return result;
-}
-
-void InitShaders_Hook() {
-    const LPVOID &This = (LPVOID)(*(DWORD*)0x8E9418);
-
-    LogFile::Format("InitShaders_Hook -> %08X\n", This);
-
-    int gameVersion = pDriv3r->GetGameVersion();
-    bool useNewSystem = true;
-
-    if (useNewSystem)
-    {
-        /* Loads shaders from AllShaders.chunk */
-        CFileChunkerHook shadersChunk = CFileChunkerHook();
-
-        LogFile::WriteLine("Loading shaders chunk...");
-        if (shadersChunk.LoadChunks("shaders\\AllShaders.chunk"))
-        {
-            int nShaders = shadersChunk.GetChunkCount();
-
-            LogFile::Format(" - Count: %d\n", nShaders);
-            for (int i = 0; i < nShaders; i++)
-            {
-                if (shadersChunk.GetChunkContext(i) == 0x53555047)
-                {
-                    DWORD bufferSize = shadersChunk.GetChunkSize(i);
-
-                    BYTE *buffer = new BYTE[bufferSize];
-
-                    //LogFile::Format(" - [%d] - Getting data (0x%08X, 0x%08X)\n", i, buffer, bufferSize);
-                    shadersChunk.GetChunkData(i, buffer, CHUNKCOPYTYPE_LOAD);
-
-                    while (shadersChunk.IsBusy());
-
-                    int index = *(DWORD*)buffer;
-                    int type = shadersChunk.GetChunkVersion(i);
-
-                    DWORD offset = (DWORD)(buffer + 4);
-                    DWORD size = bufferSize - 4;
-
-                    //LogFile::Format(" - [%d] - (index: %d, type: %d, offset: %08X, size: %08X)\n", i, index, type, offset, size);
-
-                    gpuShaders[i] = offset;
-
-                    if (InitShader(This, type, index, offset, size) > 0)
-                    {
-                        shadersChunk.Release();
-                        return;
-                    }
-                }
-            }
-
-            shadersChunk.Release();
+            result = lpfnInitGlobalShaderThing(this, offset, size);
+            LogFile::Format(" - Initialized global shader (offset: 0x%08X, size: 0x%08X), Result = 0x%08X\n",
+                offset, size, result);
         }
         else
         {
-            MessageBox(pDriv3r->GetMainWindowHwnd(), "FATAL ERROR: Cannot open shaders file!", "D3Hook", MB_OK | MB_ICONERROR);
-            ExitProcess(EXIT_FAILURE);
+            auto unk = pGlobalEffects[0]->pEffectPool;
+
+            switch (type)
+            {
+            case 1:
+                result = lpfnInitShaderThing1(this, offset, size, index, unk);
+                break;
+            case 2:
+                result = lpfnInitShaderThing2(this, offset, size, index, unk);
+                break;
+            case 3:
+                result = lpfnInitShaderThing3(this, offset, size, index, unk);
+                break;
+            case 4:
+                result = lpfnInitShaderThing4(this, offset, size, index, unk);
+                break;
+            case 5:
+                result = lpfnInitShaderThing5(this, offset, size, index, unk);
+                break;
+            case 6:
+                result = lpfnInitShaderThing6(this, offset, size, index, unk);
+                break;
+            case 7:
+                result = lpfnInitShaderThing7(this, offset, size, index, unk);
+                break;
+            case 8:
+                result = lpfnInitShaderThing8(this, offset, size, index, unk);
+                break;
+            case 9:
+                result = lpfnInitShaderThing9(this, offset, size, index, unk);
+                break;
+            case 10:
+                result = lpfnInitShaderThing10(this, offset, size, index, unk);
+                break;
+            }
+            LogFile::Format(" - Initialized shader (type: %d, offset: 0x%08X, size: 0x%08X, index: %d, unk: 0x%08X), Result = 0x%08X\n",
+                type, offset, size, index, unk, result);
         }
+        return result;
     }
-    else
+
+    int InitShaderFX()
     {
-        /* Loads shaders from EXE */
-        for (auto shader : shader_programs) {
-            auto shaderInfo = shader.info[gameVersion];
-            
-            if (InitShader(This, shader.type, shader.index, shaderInfo.offset, shaderInfo.size) > 0)
-                return;
+        if (gameversion == __DRIV3R_V100)
+        {
+            /* Loads shaders from AllShaders.chunk */
+            CFileChunker shadersChunk = CFileChunker();
+
+            int errorCode = 0;
+
+            LogFile::WriteLine("Loading shaders chunk...");
+            if (shadersChunk.OpenChunks("shaders\\AllShaders.chunk"))
+            {
+                int nShaders = shadersChunk.GetChunkCount();
+
+                LogFile::Format(" - Count: %d\n", nShaders);
+                for (int i = 0; i < nShaders; i++)
+                {
+                    if (shadersChunk.GetChunkContext(i) == 0x53555047)
+                    {
+                        int type = shadersChunk.GetChunkVersion(i);
+
+                        DWORD size = shadersChunk.GetChunkSize(i) - 4;
+                        DWORD bufSize = shadersChunk.GetPaddedChunkSize(i);
+
+                        BYTE *buffer = new BYTE[bufSize];
+                        shadersChunk.GetChunkData(i, buffer, CHUNKCOPYTYPE_LOAD);
+
+                        while (shadersChunk.IsBusy());
+
+                        int index = *(DWORD*)buffer;
+                        DWORD offset = (DWORD)(buffer + 4);
+
+                        gpuShaders[i] = offset;
+
+                        LogFile::Format(" - Initializing shader %d %d %X %X\n", type, index, offset, size);
+                        int result = this->InitShader(type, index, offset, size);
+
+                        if (result < 0) {
+                            // abort mission!
+                            errorCode = result;
+                            break;
+                        }
+                    }
+                }
+
+                shadersChunk.Release();
+            }
+            else
+            {
+                MessageBox(pDriv3r->GetMainWindow(), "FATAL ERROR: Cannot open the shaders file!", "D3Hook", MB_OK | MB_ICONERROR);
+                return E_FAIL;
+            }
+
+            // something went wrong, abort
+            if (errorCode != 0)
+                return errorCode;
         }
-    }
-
-    __asm {
-        mov esi, This
-        mov ecx, 0x0B40
-        xor eax, eax
-        mov edi, 0x8E6718 // EDI is already in use, no need to push/pop it
-        rep stosd
-    }
-
-    *(DWORD*)0x8E6844 = 1;
-    *(DWORD*)0x8E6858 = 2;
-    *(DWORD*)0x8E6894 = 3;
-    *(DWORD*)0x8E685C = 5;
-    *(DWORD*)0x8E6898 = 6;
-    *(DWORD*)0x8E68A4 = 9;
-    *(DWORD*)0x8E7D2C = 24;
-    *(DWORD*)0x8E80EC = 28;
-    *(DWORD*)0x8E70C8 = 11;
-    *(DWORD*)0x8E7294 = 12;
-    *(DWORD*)0x8E72A8 = 12;
-    *(DWORD*)0x8E72E4 = 12;
-    *(DWORD*)0x8E7F0C = 26;
-    *(DWORD*)0x8E8374 = 30;
-    *(DWORD*)0x8E83D8 = 32;
-    *(DWORD*)0x8E839C = 31;
-    *(DWORD*)0x8E8734 = 34;
-    *(DWORD*)0x8E8738 = 35;
-    *(DWORD*)0x8E874C = 36;
-    *(DWORD*)0x8E8788 = 37;
-
-    LogFile::WriteLine("Finished initializing shaders!");
-};
-
-void InstallShadersHook(int gameVersion) {
-    switch (gameVersion) {
-        case __DRIV3R_V100:
+        else
         {
-            lpfnInitShaderThing1        = 0x5DD620;
-            lpfnInitShaderThing2        = 0x5DD6B0;
-            lpfnInitShaderThing3        = 0x5DD740;
-            lpfnInitShaderThing4        = 0x5DD7D0;
-            lpfnInitShaderThing5        = 0x5DD860;
-            lpfnInitShaderThing6        = 0x5DD8F0;
-            lpfnInitShaderThing7        = 0x5DD980;
-            lpfnInitShaderThing8        = 0x5DDA10;
-            lpfnInitShaderThing9        = 0x5DDAA0;
-            lpfnInitShaderThing10       = 0x5DDB30;
-            lpfnInitGlobalShaderThing   = 0x5DE730;
+            for (auto shader : shader_programs) {
+                /* Loads shader from EXE */
+                auto shaderInfo = shader.info[gameversion];
 
-            SetJmpDest(&InitShaders_Patch, 2, &InitShaders_Hook, &lpInitShaders_Hook);
-            InstallPatch(0x5DE7E0, InitShaders_Patch, sizeof(InitShaders_Patch));
+                int result = this->InitShader(shader.type, shader.index, shaderInfo.offset, shaderInfo.size);
 
-            LOG("Installed shaders patch!");
-        } break;
-        case __DRIV3R_V120:
-        {
-            lpfnInitShaderThing1        = &ReturnNullOrZero;
-            lpfnInitShaderThing2        = &ReturnNullOrZero;
-            lpfnInitShaderThing3        = &ReturnNullOrZero;
-            lpfnInitShaderThing4        = &ReturnNullOrZero;
-            lpfnInitShaderThing5        = &ReturnNullOrZero;
-            lpfnInitShaderThing6        = &ReturnNullOrZero;
-            lpfnInitShaderThing7        = &ReturnNullOrZero;
-            lpfnInitShaderThing8        = &ReturnNullOrZero;
-            lpfnInitShaderThing9        = &ReturnNullOrZero;
-            lpfnInitShaderThing10       = &ReturnNullOrZero;
-            lpfnInitGlobalShaderThing   = &ReturnNullOrZero;
+                // don't continue if this fails
+                if (result < 0)
+                    return result;
+            }
+        }
 
-            LOG("Shaders patch not installed!");
-        } break;
-    };
+        // what the actual fuck is this structure though
+        fiero::Type<int[2880]> bins(addressof(0x8E6718, 0x8ACCC8));
+
+        memset(bins, 0, bins.length());
+
+        bins[75] = 1;
+        bins[80] = 2;
+        bins[95] = 3;
+        bins[81] = 5;
+        bins[96] = 6;
+        bins[99] = 9;
+
+        bins[1413] = 24;
+        bins[1653] = 28;
+
+        bins[620] = 11;
+
+        bins[735] = 12;
+        bins[740] = 12;
+        bins[755] = 12;
+
+        bins[1533] = 26;
+
+        bins[1815] = 30;
+        bins[1840] = 32;
+        bins[1825] = 31;
+
+        bins[2055] = 34;
+        bins[2056] = 35;
+        bins[2061] = 36;
+        bins[2076] = 37;
+
+        LogFile::WriteLine("Finished initializing shaders!");
+        return 0;
+    }
+public:
+    static bool Install() {
+        //
+        // look how easy this is to do with the vanilla version!
+        //
+        lpfnInitShaderThing1        = addressof(0x5DD620, 0x5D3D30);
+        lpfnInitShaderThing2        = addressof(0x5DD6B0, 0x5D3DA0);
+        lpfnInitShaderThing3        = addressof(0x5DD740, 0x5D3E30);
+        lpfnInitShaderThing4        = addressof(0x5DD7D0, 0x5D3EA0);
+        lpfnInitShaderThing5        = addressof(0x5DD860, 0x5D3F10);
+        lpfnInitShaderThing6        = addressof(0x5DD8F0, 0x5D3F80);
+        lpfnInitShaderThing7        = addressof(0x5DD980, 0x5D3FF0);
+        lpfnInitShaderThing8        = addressof(0x5DDA10, 0x5D4070);
+        lpfnInitShaderThing9        = addressof(0x5DDAA0, 0x5D40E0);
+        lpfnInitShaderThing10       = addressof(0x5DDB30, 0x5D4150);
+        lpfnInitGlobalShaderThing   = addressof(0x5DE730, 0x5D30B0);
+
+        if (gameversion == __DRIV3R_V120) {
+            //
+            // ...but for patch 2, we have to baptise the fucking spaghetti monster!
+            //
+            InstallPatch("Spaghetti monster patch [1/12]", {
+                0x8B, 0xCE,                     // mov ecx, esi
+                0x90, 0x90, 0x90, 0x90, 0x90,   // nop(5)           ; space for our call injection
+                0x85, 0xC0,                     // test eax, eax
+            }, { 0x5D2600 });
+
+            //
+            // converting these to __thiscall is sooo much fun -.-
+            //
+            InstallPatch("Spaghetti monster patch [2/12]", {
+                // we're so incredibly tight on space, holy shit
+                0x58,                           // 00:-004 pop eax          ; remove return address (note our stack pointer deficiency)
+                0x51,                           // 01:-008 push ecx         ; make the stack of spaghetti happy
+                0x50,                           // 02:-004 push eax         ; restore return address
+
+                // recreate the original entry point in as few bytes as possible
+                0x53,                           // 03: 000 push ebx
+                0x55,                           // 04: 004 push ebp
+                0x51,                           // 05: 008 push ecx         ; get ECX into EBP
+                0x5D,                           // 06: 00C pop ebp          ; voila!
+
+                // unfortunately we added a byte, so shift everything down as tightly-packed as possible
+                0x56,                           // 07: 008 push esi
+                0x57,                           // 08: 00C push edi
+                0x6A, 0x40,                     // 09: 010 push 40h
+                0xE8, 0xF5, 0xF3, 0x00, 0x00,   // 11: 014 call 5E24B5      ; remove 1 byte from the RVA
+                0x5F,                           // 16: 014 pop edi          ; clean up the stack (this saves us 2 bytes)
+
+                // voila! the stack is now cleaned up and re-aligned :)
+                0x33, 0xFF,                     // 17: 010 xor edi, edi     ; almost there!
+                0x90,                           // 19: 010 nop              ; phew! just a single byte to spare ;)
+            }, { 0x5D30B0 });
+
+            //
+            // well, here we fucking go...sing it, programmer man!
+            //
+
+            // 10 fucked up compiler calls; take one down, patch it around, 9 fucked up compiler calls
+            InstallPatch("Spaghetti monster patch [3/12]", {
+                0x8B, 0xF9,                     // mov edi, ecx
+                0xE8, 0x77, 0xE7, 0x00, 0x00,   // call 5E24B5
+                0x5B,                           // pop ebx
+                0x33, 0xDB,                     // xor ebx, ebx
+            }, { 0x5D3D37 });
+            // 9 fucked up compiler calls; take one down, patch it around, 8 fucked up compiler calls
+            InstallPatch("Spaghetti monster patch [4/12]", {
+                0x8B, 0xF9,                     // mov edi, ecx
+                0xE8, 0x07, 0xE7, 0x00, 0x00,   // call 5E24B5
+                0x5B,                           // pop ebx
+                0x33, 0xDB,                     // xor ebx, ebx
+            }, { 0x5D3DA7 });
+            // 8 fucked up compiler calls; take one down, patch it around, 7 fucked up compiler calls
+            InstallPatch("Spaghetti monster patch [5/12]", {
+                0x8B, 0xF9,                     // mov edi, ecx
+                0xE8, 0x77, 0xE6, 0x00, 0x00,   // call 5E24B5
+                0x5B,                           // pop ebx
+                0x33, 0xDB,                     // xor ebx, ebx
+            }, { 0x5D3E37 });
+            // 7 fucked up compiler calls; take one down, patch it around, 6 fucked up compiler calls
+            InstallPatch("Spaghetti monster patch [6/12]", {
+                0x8B, 0xF9,                     // mov edi, ecx
+                0xE8, 0x07, 0xE6, 0x00, 0x00,   // call 5E24B5
+                0x5B,                           // pop ebx
+                0x33, 0xDB,                     // xor ebx, ebx
+            }, { 0x5D3EA7 });
+            // 6 fucked up compiler calls; take one down, patch it around, 5 fucked up compiler calls
+            InstallPatch("Spaghetti monster patch [7/12]", {
+                0x8B, 0xF9,                     // mov edi, ecx
+                0xE8, 0x97, 0xE5, 0x00, 0x00,   // call 5E24B5
+                0x5B,                           // pop ebx
+                0x33, 0xDB,                     // xor ebx, ebx
+            }, { 0x5D3F17 });
+            // 5 fucked up compiler calls; take one down, patch it around, 4 fucked up compiler calls
+            InstallPatch("Spaghetti monster patch [8/12]", {
+                0x8B, 0xF9,                     // mov edi, ecx
+                0xE8, 0x27, 0xE5, 0x00, 0x00,   // call 5E24B5
+                0x5B,                           // pop ebx
+                0x33, 0xDB,                     // xor ebx, ebx
+            }, { 0x5D3F87 });
+            // 4 fucked up compiler calls; take one down, patch it around, 3 fucked up compiler calls
+            InstallPatch("Spaghetti monster patch [9/12]", {
+                0x8B, 0xF9,                     // mov edi, ecx
+                0xE8, 0xB7, 0xE4, 0x00, 0x00,   // call 5E24B5
+                0x5B,                           // pop ebx
+                0x33, 0xDB,                     // xor ebx, ebx
+            }, { 0x5D3FF7 });
+            // 3 fucked up compiler calls; take one down, patch it around, 2 fucked up compiler calls
+            InstallPatch("Spaghetti monster patch [10/12]", {
+                0x8B, 0xF9,                     // mov edi, ecx
+                0xE8, 0x37, 0xE4, 0x00, 0x00,   // call 5E24B5
+                0x5B,                           // pop ebx
+                0x33, 0xDB,                     // xor ebx, ebx
+            }, { 0x5D4077 });
+            // 2 fucked up compiler calls; take one down, patch it around, 1 fucked up compiler call
+            InstallPatch("Spaghetti monster patch [11/12]", {
+                0x8B, 0xD9,                     // mov ebx, ecx
+                0xE8, 0xCA, 0xE3, 0x00, 0x00,   // call 5E24B5
+                0x5F,                           // pop edi
+                0x33, 0xFF,                     // xor edi, edi
+            }, { 0x5D40E4 });
+            // 1 fucked up compiler call; take one down, patch it around, NO MORE FUCKED UP COMPILER CALLS!!!
+            InstallPatch("Spaghetti monster patch [12/12]", {
+                0x8B, 0xD9,                     // mov ebx, ecx
+                0xE8, 0x5B, 0xE3, 0x00, 0x00,   // call 5E24B5
+                0x5F,                           // pop edi
+            }, { 0x5D4153 });
+            //
+            // I will NEVER do this again.
+            //
+        }
+
+        //
+        // This is the only fucking thing I will ever support for Patch 2, I swear!
+        //
+        InstallCallback("effectManager::InitShaderFX", "Allows for custom shader processing.",
+            &InitShaderFX, {
+                addressof<CALL>(0x5DEFA9, 0x5D2602),
+            }
+        );
+
+        return true;
+    }
 };
 
-// 0x5EB19A - 0x5EB1E9
-BYTE ModelLoadLods_Patch[] = {
-    0x50,                               // 00: push eax
-    0x53,                               // 01: push ebx
-    0x56,                               // 02: push esi
-    0xFF, 0x15, 0xCD, 0xCD, 0xCD, 0xCD, // 03: call [...]
-    0x83, 0xC4, 0x0C,                   // 09: add esp, 0Ch
-    0x5E,                               // 12: pop esi
-    0x5B,                               // 13: pop ebx
-    0x83, 0xC4, 0x0C,                   // 14: add esp, 0Ch
-    0xC3                                // 17: retn
-};
+FnHook<void,MeshGroup*,void *> lpfnInitLodInstance;
 
-DWORD lpModelLoadLods_Hook;
-FnHook<void,MeshGroup*,DWORD> lpfnModelLoadLod;
+/*
+    NOT COMPATIBLE WITH PATCH 2
+*/
+class DrawListHandler {
+public:
+    static void initLodInstances(void *model, void *inst, ModelContainer *container) {
+        // BUGFIX: "Taxi taillight bug"
+        int lod = 0;
 
-void ModelLoadLods_Hook(DWORD lpModel, DWORD lpUnk, ModelContainer *lpContainer) {
-    DWORD lod;
-
-    switch (*(WORD*)((BYTE*)lpUnk + 0x62) & 0x1F) {
+        switch (*(WORD*)((BYTE*)inst + 0x62) & 0x1F) {
         case 1:
             lod = 4;
             break;
@@ -997,87 +783,1333 @@ void ModelLoadLods_Hook(DWORD lpModel, DWORD lpUnk, ModelContainer *lpContainer)
             break;
         default:
             return;
+        }
+
+        LodEntry &entry = container->Entries[lod];
+
+        auto pModels = entry.MeshGroups;
+        auto nModels = entry.nMeshGroups;
+
+        if (pModels != nullptr)
+        {
+            for (int i = 0; i < nModels; i++)
+                lpfnInitLodInstance(&pModels[i], model);
+        }
     }
 
-    LodEntry &entry = lpContainer->Entries[lod];
-
-    auto pModels = entry.MeshGroups;
-    auto nModels = entry.nMeshGroups;
-
-    if (pModels == NULL)
-        return;
-
-    for (int i = 0; i < nModels; i++)
-        lpfnModelLoadLod(&pModels[i], lpModel);
-};
-
-void InstallPatches(int gameVersion) {
-    switch (gameVersion)
-    {
+    static bool Install() {
+        switch (gameversion)
+        {
         case __DRIV3R_V100:
         {
-            InstallShadersHook(gameVersion);
+            lpfnInitLodInstance = 0x5EB0A0;
 
-            // BUGFIX: "Taxi taillight bug"
-            lpfnModelLoadLod = 0x5EB0A0;
+            InstallPatch({
+                0x50,                               // 00: push eax
+                0x53,                               // 01: push ebx
+                0x56,                               // 02: push esi
+                0x90, 0x90, 0x90, 0x90, 0x90,       // 03: nop(5)       ; space for our call injection
+                0x83, 0xC4, 0x0C,                   // 08: add esp, 0Ch
+                0x90, 0x90,                         // 11: nop(2)
+                0xE9,                               // 13: jmp [...]    ; ja -> jmp
+            }, { 0x5EB19A });
 
-            SetJmpDest(&ModelLoadLods_Patch, 5, &ModelLoadLods_Hook, &lpModelLoadLods_Hook);
-            InstallPatch(0x5EB19A, ModelLoadLods_Patch, sizeof(ModelLoadLods_Patch));
-        } break;
-        case __DRIV3R_V120:
+            InstallCallback("initLodInstances", "Fixes the taxi taillight bug",
+                &initLodInstances, {
+                    cbHook<CALL>(0x5EB19A + 3),     // see patch above
+                }
+            );
+        } return true;
+        default:
+            HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS();
+            return false;
+        }
+    }
+};
+
+struct StateParamsHolder {
+    int type;
+    int value;
+
+    constexpr inline StateParamsHolder(int type, int value)
+        : type(type), value(value) {}
+    constexpr inline StateParamsHolder(int type, float value)
+        : type(type), value(*reinterpret_cast<int *>(&value)) {}
+};
+
+class renderer;
+class rendererHandler;
+
+class d3dStateManager;
+
+static char * D3DVAL2STR(int etype, int type, int value) {
+    switch (etype) {
+        // D3DRS
+    case 0:
+    {
+        switch (type) {
+        case D3DRS_ZENABLE:
+        case D3DRS_ZWRITEENABLE:
+        case D3DRS_ALPHATESTENABLE:
+        case D3DRS_DITHERENABLE:
+        case D3DRS_ALPHABLENDENABLE:
+        case D3DRS_FOGENABLE:
+        case D3DRS_SPECULARENABLE:
+        case D3DRS_RANGEFOGENABLE:
+        case D3DRS_STENCILENABLE:
+        case D3DRS_NORMALIZENORMALS:
+        case D3DRS_CLIPPLANEENABLE:
+        case D3DRS_POINTSPRITEENABLE:
+        case D3DRS_POINTSCALEENABLE:
+        case D3DRS_MULTISAMPLEANTIALIAS:
+        case D3DRS_INDEXEDVERTEXBLENDENABLE:
+        case D3DRS_SCISSORTESTENABLE:
+        case D3DRS_ANTIALIASEDLINEENABLE:
+        case D3DRS_ENABLEADAPTIVETESSELLATION:
+        case D3DRS_TWOSIDEDSTENCILMODE:
+        case D3DRS_SEPARATEALPHABLENDENABLE:
+            return (value) ? "TRUE" : "FALSE";
+        }
+    } break;
+    }
+
+    static char _vbuf[32] { 0 };
+
+    sprintf(_vbuf, "0x%02X", value);
+    return _vbuf;
+}
+static char * D3DSAMP_STRING(int type) {
+    switch (type) {
+        ENUMCASE2STR(D3DSAMP_ADDRESSU)
+        ENUMCASE2STR(D3DSAMP_ADDRESSV)
+        ENUMCASE2STR(D3DSAMP_ADDRESSW)
+        ENUMCASE2STR(D3DSAMP_BORDERCOLOR)
+        ENUMCASE2STR(D3DSAMP_MAGFILTER)
+        ENUMCASE2STR(D3DSAMP_MINFILTER)
+        ENUMCASE2STR(D3DSAMP_MIPFILTER)
+        ENUMCASE2STR(D3DSAMP_MIPMAPLODBIAS)
+        ENUMCASE2STR(D3DSAMP_MAXMIPLEVEL)
+        ENUMCASE2STR(D3DSAMP_MAXANISOTROPY)
+        ENUMCASE2STR(D3DSAMP_SRGBTEXTURE)
+        ENUMCASE2STR(D3DSAMP_ELEMENTINDEX)
+        ENUMCASE2STR(D3DSAMP_DMAPOFFSET)
+    }
+    return "<???>";
+}
+static char * D3DTSS_STRING(int type) {
+    switch (type) {
+        ENUMCASE2STR(D3DTSS_COLOROP)
+        ENUMCASE2STR(D3DTSS_COLORARG1)
+        ENUMCASE2STR(D3DTSS_COLORARG2)
+        ENUMCASE2STR(D3DTSS_ALPHAOP)
+        ENUMCASE2STR(D3DTSS_ALPHAARG1)
+        ENUMCASE2STR(D3DTSS_ALPHAARG2)
+        ENUMCASE2STR(D3DTSS_BUMPENVMAT00)
+        ENUMCASE2STR(D3DTSS_BUMPENVMAT01)
+        ENUMCASE2STR(D3DTSS_BUMPENVMAT10)
+        ENUMCASE2STR(D3DTSS_BUMPENVMAT11)
+        ENUMCASE2STR(D3DTSS_TEXCOORDINDEX)
+        ENUMCASE2STR(D3DTSS_BUMPENVLSCALE)
+        ENUMCASE2STR(D3DTSS_BUMPENVLOFFSET)
+        ENUMCASE2STR(D3DTSS_TEXTURETRANSFORMFLAGS)
+        ENUMCASE2STR(D3DTSS_COLORARG0)
+        ENUMCASE2STR(D3DTSS_ALPHAARG0)
+        ENUMCASE2STR(D3DTSS_RESULTARG)
+        ENUMCASE2STR(D3DTSS_CONSTANT)
+    }
+    return "<???>";
+}
+static char * D3DRS_STRING(int type) {
+    switch (type) {
+        ENUMCASE2STR(D3DRS_ZENABLE)
+        ENUMCASE2STR(D3DRS_FILLMODE)
+        ENUMCASE2STR(D3DRS_SHADEMODE)
+        ENUMCASE2STR(D3DRS_ZWRITEENABLE)
+        ENUMCASE2STR(D3DRS_ALPHATESTENABLE)
+        ENUMCASE2STR(D3DRS_LASTPIXEL)
+        ENUMCASE2STR(D3DRS_SRCBLEND)
+        ENUMCASE2STR(D3DRS_DESTBLEND)
+        ENUMCASE2STR(D3DRS_CULLMODE)
+        ENUMCASE2STR(D3DRS_ZFUNC)
+        ENUMCASE2STR(D3DRS_ALPHAREF)
+        ENUMCASE2STR(D3DRS_ALPHAFUNC)
+        ENUMCASE2STR(D3DRS_DITHERENABLE)
+        ENUMCASE2STR(D3DRS_ALPHABLENDENABLE)
+        ENUMCASE2STR(D3DRS_FOGENABLE)
+        ENUMCASE2STR(D3DRS_SPECULARENABLE)
+        ENUMCASE2STR(D3DRS_FOGCOLOR)
+        ENUMCASE2STR(D3DRS_FOGTABLEMODE)
+        ENUMCASE2STR(D3DRS_FOGSTART)
+        ENUMCASE2STR(D3DRS_FOGEND)
+        ENUMCASE2STR(D3DRS_FOGDENSITY)
+        ENUMCASE2STR(D3DRS_RANGEFOGENABLE)
+        ENUMCASE2STR(D3DRS_STENCILENABLE)
+        ENUMCASE2STR(D3DRS_STENCILFAIL)
+        ENUMCASE2STR(D3DRS_STENCILZFAIL)
+        ENUMCASE2STR(D3DRS_STENCILPASS)
+        ENUMCASE2STR(D3DRS_STENCILFUNC)
+        ENUMCASE2STR(D3DRS_STENCILREF)
+        ENUMCASE2STR(D3DRS_STENCILMASK)
+        ENUMCASE2STR(D3DRS_STENCILWRITEMASK)
+        ENUMCASE2STR(D3DRS_TEXTUREFACTOR)
+        ENUMCASE2STR(D3DRS_WRAP0)
+        ENUMCASE2STR(D3DRS_WRAP1)
+        ENUMCASE2STR(D3DRS_WRAP2)
+        ENUMCASE2STR(D3DRS_WRAP3)
+        ENUMCASE2STR(D3DRS_WRAP4)
+        ENUMCASE2STR(D3DRS_WRAP5)
+        ENUMCASE2STR(D3DRS_WRAP6)
+        ENUMCASE2STR(D3DRS_WRAP7)
+        ENUMCASE2STR(D3DRS_CLIPPING)
+        ENUMCASE2STR(D3DRS_LIGHTING)
+        ENUMCASE2STR(D3DRS_AMBIENT)
+        ENUMCASE2STR(D3DRS_FOGVERTEXMODE)
+        ENUMCASE2STR(D3DRS_COLORVERTEX)
+        ENUMCASE2STR(D3DRS_LOCALVIEWER)
+        ENUMCASE2STR(D3DRS_NORMALIZENORMALS)
+        ENUMCASE2STR(D3DRS_DIFFUSEMATERIALSOURCE)
+        ENUMCASE2STR(D3DRS_SPECULARMATERIALSOURCE)
+        ENUMCASE2STR(D3DRS_AMBIENTMATERIALSOURCE)
+        ENUMCASE2STR(D3DRS_EMISSIVEMATERIALSOURCE)
+        ENUMCASE2STR(D3DRS_VERTEXBLEND)
+        ENUMCASE2STR(D3DRS_CLIPPLANEENABLE)
+        ENUMCASE2STR(D3DRS_POINTSIZE)
+        ENUMCASE2STR(D3DRS_POINTSIZE_MIN)
+        ENUMCASE2STR(D3DRS_POINTSPRITEENABLE)
+        ENUMCASE2STR(D3DRS_POINTSCALEENABLE)
+        ENUMCASE2STR(D3DRS_POINTSCALE_A)
+        ENUMCASE2STR(D3DRS_POINTSCALE_B)
+        ENUMCASE2STR(D3DRS_POINTSCALE_C)
+        ENUMCASE2STR(D3DRS_MULTISAMPLEANTIALIAS)
+        ENUMCASE2STR(D3DRS_MULTISAMPLEMASK)
+        ENUMCASE2STR(D3DRS_PATCHEDGESTYLE)
+        ENUMCASE2STR(D3DRS_DEBUGMONITORTOKEN)
+        ENUMCASE2STR(D3DRS_POINTSIZE_MAX)
+        ENUMCASE2STR(D3DRS_INDEXEDVERTEXBLENDENABLE)
+        ENUMCASE2STR(D3DRS_COLORWRITEENABLE)
+        ENUMCASE2STR(D3DRS_TWEENFACTOR)
+        ENUMCASE2STR(D3DRS_BLENDOP)
+        ENUMCASE2STR(D3DRS_POSITIONDEGREE)
+        ENUMCASE2STR(D3DRS_NORMALDEGREE)
+        ENUMCASE2STR(D3DRS_SCISSORTESTENABLE)
+        ENUMCASE2STR(D3DRS_SLOPESCALEDEPTHBIAS)
+        ENUMCASE2STR(D3DRS_ANTIALIASEDLINEENABLE)
+        ENUMCASE2STR(D3DRS_MINTESSELLATIONLEVEL)
+        ENUMCASE2STR(D3DRS_MAXTESSELLATIONLEVEL)
+        ENUMCASE2STR(D3DRS_ADAPTIVETESS_X)
+        ENUMCASE2STR(D3DRS_ADAPTIVETESS_Y)
+        ENUMCASE2STR(D3DRS_ADAPTIVETESS_Z)
+        ENUMCASE2STR(D3DRS_ADAPTIVETESS_W)
+        ENUMCASE2STR(D3DRS_ENABLEADAPTIVETESSELLATION)
+        ENUMCASE2STR(D3DRS_TWOSIDEDSTENCILMODE)
+        ENUMCASE2STR(D3DRS_CCW_STENCILFAIL)
+        ENUMCASE2STR(D3DRS_CCW_STENCILZFAIL)
+        ENUMCASE2STR(D3DRS_CCW_STENCILPASS)
+        ENUMCASE2STR(D3DRS_CCW_STENCILFUNC)
+        ENUMCASE2STR(D3DRS_COLORWRITEENABLE1)
+        ENUMCASE2STR(D3DRS_COLORWRITEENABLE2)
+        ENUMCASE2STR(D3DRS_COLORWRITEENABLE3)
+        ENUMCASE2STR(D3DRS_BLENDFACTOR)
+        ENUMCASE2STR(D3DRS_SRGBWRITEENABLE)
+        ENUMCASE2STR(D3DRS_DEPTHBIAS)
+        ENUMCASE2STR(D3DRS_WRAP8)
+        ENUMCASE2STR(D3DRS_WRAP9)
+        ENUMCASE2STR(D3DRS_WRAP10)
+        ENUMCASE2STR(D3DRS_WRAP11)
+        ENUMCASE2STR(D3DRS_WRAP12)
+        ENUMCASE2STR(D3DRS_WRAP13)
+        ENUMCASE2STR(D3DRS_WRAP14)
+        ENUMCASE2STR(D3DRS_WRAP15)
+        ENUMCASE2STR(D3DRS_SEPARATEALPHABLENDENABLE)
+        ENUMCASE2STR(D3DRS_SRCBLENDALPHA)
+        ENUMCASE2STR(D3DRS_DESTBLENDALPHA)
+        ENUMCASE2STR(D3DRS_BLENDOPALPHA)
+    }
+    return "<???>";
+};
+
+static char * VALS2STR(char *type, char *value) {
+    static char _buf1[48]{ 0 };
+    static char _buf2[64]{ 0 };
+
+    sprintf(_buf1, "%s,", type);
+    sprintf(_buf2, "%-40s%s", _buf1, value);
+
+    return _buf2;
+};
+
+static auto d3dStateManager_SetRenderStateParams        = fiero::as<d3dStateManager>::func<int, int, StateParamsHolder *, int>(0x5DF810);
+static auto d3dStateManager_SetTextureStageStateParams  = fiero::as<d3dStateManager>::func<int, int, StateParamsHolder *, int>(0x5DF7B0);
+static auto d3dStateManager_SetSamplerStateParams       = fiero::as<d3dStateManager>::func<int, int, StateParamsHolder *, int>(0x5DF740);
+static auto d3dStateManager_setGlobalStateParams        = fiero::as<d3dStateManager>::func<void,
+    StateParamsHolder *, int,
+    StateParamsHolder *, int,
+    StateParamsHolder *, int>(0x5DFFF0);
+
+/*
+    NOT COMPATIBLE WITH PATCH 2
+*/
+class d3dStateManager {
+public:
+    struct stateholder {
+        StateParamsHolder texturestates[80];
+        int texturestatescount;
+
+        StateParamsHolder renderstates[80];
+        int renderstatescount;
+
+        StateParamsHolder samplerstates[80];
+        int samplerstatescount;
+
+        // yikes
+        inline void addSamplerState(StateParamsHolder samplerState) {
+            samplerstates[samplerstatescount++] = samplerState;
+        };
+    };
+    
+    stateholder states[51];
+    int nStates;
+
+    stateholder globalstate;
+
+    void dumpstateparams(int state,
+        StateParamsHolder *pRenderStates, int nRenderStates,
+        StateParamsHolder *pT1States, int nT1States,
+        StateParamsHolder *pT2States, int nT2States)
+    {
+        auto statePtr = (state == -1) ? &globalstate : &states[state];
+
+        LogFile::Format("/* %08X */\n", statePtr);
+        if (state == -1) {
+            LogFile::WriteLine("GLOBAL_STATE : {");
+        } else {
+            LogFile::Format("STATE[%d] : {\n", state);
+        }
+
+        if (nRenderStates > 0)
         {
+            LogFile::WriteLine("  RENDERSTATES : {");
+            for (int r = 0; r < nRenderStates; r++)
+            {
+                auto rs = pRenderStates[r];
+
+                LogFile::Format("    /* %08X */{ %s }\n", &statePtr->renderstates[r], VALS2STR(D3DRS_STRING(rs.type), D3DVAL2STR(0, rs.type, rs.value)));
+            }
+            LogFile::WriteLine("  }");
+        }
+
+        if (nT1States > 0)
+        {
+            LogFile::WriteLine("  TEXTURESTATES : {");
+            for (int t = 0; t < nT1States; t++)
+            {
+                auto ts = pT1States[t];
+
+                LogFile::Format("    /* %08X */{ %s }\n", &statePtr->texturestates[t], VALS2STR(D3DTSS_STRING(ts.type), D3DVAL2STR(1, ts.type, ts.value)));
+            }
+            LogFile::WriteLine("  }");
+        }
+
+        if (nT2States > 0)
+        {
+            LogFile::WriteLine("  SAMPLERSTATES : {");
+            for (int s = 0; s < nT2States; s++)
+            {
+                auto ss = pT2States[s];
+
+                LogFile::Format("    /* %08X */{ %s }\n", &statePtr->samplerstates[s], VALS2STR(D3DSAMP_STRING(ss.type), D3DVAL2STR(2, ss.type, ss.value)));
+            }
+            LogFile::WriteLine("  }");
+        }
+
+        LogFile::WriteLine("}");
+    }
+
+    void setGlobalStateParams(StateParamsHolder *pRenderStates, int nRenderStates,
+        StateParamsHolder *pT1States, int nT1States,
+        StateParamsHolder *pT2States, int nT2States)
+    {
+        dumpstateparams(-1, pRenderStates, nRenderStates, pT1States, nT1States, pT2States, nT2States);
+        d3dStateManager_setGlobalStateParams(this, pRenderStates, nRenderStates, pT1States, nT1States, pT2States, nT2States);
+    }
+
+    static bool Install()
+    {
+        switch (gameversion)
+        {
+        case __DRIV3R_V100:
+        {
+            InstallCallback("d3dStateManager::SetGlobalStateParams",
+                &setGlobalStateParams, {
+                    cbHook<CALL>(0x5E6D01),
+                }
+            );
+        } return true;
+        default:
+            HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS();
+            return false;
+        }
+    }
+};
+
+class renderer {
+protected:
+    static fiero::Field<0x44, d3dStateManager *> _Manager;
+};
+
+static auto renderer_registerStateParams = fiero::as<renderer>::func<void>(0x5E4680);
+static fiero::Type<d3dStateManager *> pD3DStateManager(0x8AFAAC);
+
+// lookup tables that will get filled with defaults if zero
+static int g_FirstPassHandlers[52]{ 0 };
+static int g_SecondPassHandlers[52]{ 0 };
+
+/*
+    NOT COMPATIBLE WITH PATCH 2
+*/
+class rendererHandler : public renderer {
+public:
+    void setStateParams(int *pStateIds, int nStateIds,
+                        StateParamsHolder *pRenderStates, int nRenderStates,
+                        StateParamsHolder *pT1States, int nT1States,
+                        StateParamsHolder *pT2States, int nT2States) {
+        auto manager = _Manager.get(this);
+
+        for (int i = 0; i < nStateIds; i++)
+        {
+            int state = pStateIds[i];
+
+            // dump that shit
+            manager->dumpstateparams(state, pRenderStates, nRenderStates, pT1States, nT1States, pT2States, nT2States);
+
+            /* actually set the shit */
+            d3dStateManager_SetRenderStateParams(manager, state, pRenderStates, nRenderStates);
+            d3dStateManager_SetTextureStageStateParams(manager, state, pT1States, nT1States);
+            d3dStateManager_SetSamplerStateParams(manager, state, pT2States, nT2States);
+        }
+    }
+
+    void setStateParamsCustom(int state,
+            StateParamsHolder *pRenderStates, int nRenderStates,
+            StateParamsHolder *pTextureStates, int nTextureStates,
+            StateParamsHolder *pSamplerStates, int nSamplerStates)
+    {
+        auto manager = _Manager.get(this);
+
+        manager->dumpstateparams(state, pRenderStates, nRenderStates, pTextureStates, nTextureStates, pSamplerStates, nSamplerStates);
+
+        if (nRenderStates > 0)
+            d3dStateManager_SetRenderStateParams(manager, state, pRenderStates, nRenderStates);
+        if (nTextureStates > 0)
+            d3dStateManager_SetTextureStageStateParams(manager, state, pTextureStates, nTextureStates);
+        if (nSamplerStates > 0)
+            d3dStateManager_SetSamplerStateParams(manager, state, pSamplerStates, nSamplerStates);
+    }
+
+    // I really do mean INLINE!
+    FORCEINLINE void setStateParamsCustom(int state,
+            std::initializer_list<StateParamsHolder> renderStates,
+            std::initializer_list<StateParamsHolder> textureStates = {},
+            std::initializer_list<StateParamsHolder> samplerStates = {})
+    {
+        setStateParamsCustom(state,
+            (StateParamsHolder *)renderStates.begin(), renderStates.size(),
+            (StateParamsHolder *)textureStates.begin(), textureStates.size(),
+            (StateParamsHolder *)samplerStates.begin(), samplerStates.size());
+    }
+
+    void applyFixupStateParams(void) {
+        auto manager = _Manager.get(this);
+
+        LogFile::WriteLine("Applying fixup state params...");
+
+        // cleaner alpha textures
+        setStateParamsCustom(3, {
+            { D3DRS_ZFUNC,                          D3DCMP_LESSEQUAL },
+            { D3DRS_ZWRITEENABLE,                   TRUE },
+            { D3DRS_ALPHABLENDENABLE,               FALSE },
+            { D3DRS_ALPHATESTENABLE,                TRUE },
+            { D3DRS_CULLMODE,                       D3DCULL_CW },
+            { D3DRS_ALPHAFUNC,                      D3DCMP_GREATER },
+            { D3DRS_ALPHAREF,                       0x3F },
+            { D3DRS_FOGENABLE,                      TRUE },
+            { D3DRS_FOGTABLEMODE,                   D3DFOG_NONE },
+            { D3DRS_SEPARATEALPHABLENDENABLE,       TRUE },
+            { D3DRS_SPECULARENABLE,                 FALSE },
+        }, {
+            { D3DTSS_COLOROP,                       D3DTOP_MODULATE },
+            { D3DTSS_COLORARG1,                     D3DTA_DIFFUSE },
+            { D3DTSS_COLORARG2,                     D3DTA_TEXTURE },
+            { D3DTSS_ALPHAOP,                       D3DTOP_MODULATE },
+            { D3DTSS_ALPHAARG1,                     D3DTA_DIFFUSE },
+            { D3DTSS_ALPHAARG2,                     D3DTA_TEXTURE },
+        });
+
+        // fixes steering wheels :)
+        setStateParamsCustom(11, {
+            { D3DRS_ZFUNC,                          D3DCMP_LESSEQUAL },
+            { D3DRS_ZWRITEENABLE,                   TRUE },
+            { D3DRS_ALPHATESTENABLE,                TRUE },
+            { D3DRS_ALPHABLENDENABLE,               FALSE },
+            { D3DRS_ALPHAFUNC,                      D3DCMP_GREATER },
+            { D3DRS_ALPHAREF,                       0x9F },
+            { D3DRS_FOGENABLE,                      FALSE },
+            { D3DRS_FOGTABLEMODE,                   D3DFOG_NONE },
+            { D3DRS_SPECULARENABLE,                 TRUE },
+        }, {
+            { D3DTSS_COLOROP,                       D3DTOP_MODULATE },
+            { D3DTSS_COLORARG1,                     D3DTA_DIFFUSE },
+            { D3DTSS_COLORARG2,                     D3DTA_TEXTURE },
+            { D3DTSS_ALPHAOP,                       D3DTOP_DISABLE },
+        }, {
+            { D3DSAMP_MIPMAPLODBIAS,                -2.0f },
+        });
+
+        // lights (TODO: make these look sexy)
+        setStateParamsCustom(19, {
+            { D3DRS_ALPHABLENDENABLE,               TRUE },
+            { D3DRS_ALPHATESTENABLE,                TRUE },
+            { D3DRS_BLENDOP,                        D3DBLENDOP_ADD },
+            { D3DRS_SRCBLEND,                       D3DBLEND_SRCALPHA },
+            { D3DRS_DESTBLEND,                      D3DBLEND_ONE },
+        }, {
+            { D3DTSS_COLOROP,                       D3DTOP_MODULATE },
+            { D3DTSS_COLORARG1,                     D3DTA_DIFFUSE },
+            { D3DTSS_COLORARG2,                     D3DTA_TEXTURE },
+            { D3DTSS_ALPHAOP,                       D3DTOP_MODULATE },
+            { D3DTSS_ALPHAARG1,                     D3DTA_DIFFUSE },
+            { D3DTSS_ALPHAARG2,                     D3DTA_TEXTURE },
+
+        });
+
+        // finally fixing the shadows!
+        setStateParamsCustom(39, {
+            { D3DRS_ZFUNC,                          D3DCMP_LESSEQUAL },
+            { D3DRS_ZWRITEENABLE,                   FALSE },
+            { D3DRS_ALPHATESTENABLE,                TRUE },
+            { D3DRS_ALPHABLENDENABLE,               TRUE },
+            { D3DRS_ALPHAREF,                       0x3F },
+            { D3DRS_FOGENABLE,                      FALSE },
+            { D3DRS_SRCBLEND,                       D3DBLEND_SRCALPHA },
+            { D3DRS_DESTBLEND,                      D3DBLEND_ONE },
+            { D3DRS_STENCILREF,                     0x01 },
+            { D3DRS_STENCILPASS,                    D3DSTENCILOP_REPLACE },
+            { D3DRS_STENCILFUNC,                    D3DCMP_ALWAYS },
+            { D3DRS_STENCILFAIL,                    D3DSTENCILOP_KEEP },
+            { D3DRS_STENCILENABLE,                  TRUE },
+            { D3DRS_COLORWRITEENABLE,               0x08 },
+        }, {
+            { D3DTSS_COLOROP,                       D3DTOP_MODULATE },
+            { D3DTSS_COLORARG1,                     D3DTA_DIFFUSE },
+            { D3DTSS_COLORARG2,                     D3DTA_TEXTURE },
+            { D3DTSS_ALPHAOP,                       D3DTOP_BLENDTEXTUREALPHA },
+        }, {
+            { D3DSAMP_ADDRESSU,                     D3DTADDRESS_CLAMP },
+            { D3DSAMP_ADDRESSV,                     D3DTADDRESS_CLAMP },
+        });
+
+        // quick and dirty way to try fixing mipmaps
+        manager->globalstate.addSamplerState({ D3DSAMP_MIPMAPLODBIAS, -1.0f });
+    }
+
+    void registerStateParams(void) {
+        auto manager = _Manager.get(this);
+
+        LogFile::Format("Initializing renderer state params (manager: %08X)\n", manager);
+        renderer_registerStateParams(this);
+
+        applyFixupStateParams();
+    }
+
+    // ripped directly from Patch 2
+    // I fail to see a difference when using this, however
+    static int GetDefaultFirstPassStateHandlerIndex_PATCH2(int type) {
+        switch ( type )
+        {
+        case 0:
+        case 21:
+            return 4;
+        case 1:
+        case 9:
+        case 13:
+            return 30;
+        case 2:
+            return 32;
+        case 3:
+            return 31;
+        case 4:
+            return 39;
+        case 5:
+            return 33;
+        case 6:
+            return 2;
+        case 7:
+        case 16:
+        case 17:
+        case 18:
+        case 29:
+            return 12;
+        case 10:
+            return 14;
+        case 11:
+        case 12:
+            return 10;
+        case 14:
+            return 15;
+        case 15:
+            return 16;
+        case 19:
+        case 23:
+            return 9;
+        case 20:
+            return 7;
+        case 22:
+            return 5;
+        case 24:
+        case 28:
+            return 8;
+        case 25:
+            return 21;
+        case 26:
+            return 38;
+        case 27:
+            return 17;
+        case 30:
+            return 19;
+        case 31:
+        case 32:
+            return 13;
+        case 33:
+        case 47:
+        case 48:
+        case 49:
+        case 50:
+        case 51:
+        case 53:
+            return 23;
+        case 34:
+        case 35:
+        case 36:
+        case 37:
+        case 38:
+        case 39:
+        case 40:
+        case 41:
+        case 42:
+        case 43:
+        case 44:
+        case 45:
+            return 25;
+        case 46:
+            return 24;
+        case 52:
+            return 26;    
+        }
+
+        return 1;
+    }
+
+    static int GetDefaultFirstPassStateHandlerIndex(int type) {
+        switch (type)
+        {
+            //
+            // FIXUPS
+            //
+            case 8:
+                return 3;
+            case 11:
+                return 11;
+            //
+            // DEFAULTS
+            //
+            case 0:
+            case 21:
+                return 4;
+            case 1:
+            case 9:
+            case 13:
+                return 30;
+            case 2:
+                return 32;
+            case 3:
+                return 31;
+            case 4:
+                return 39;
+            case 5:
+                return 33;
+            case 6:
+                return 2;
+            case 7:
+            case 16:
+            case 17:
+            case 18:
+            case 28:
+                return 12;
+            case 10:
+                return 14;
+            case 12:
+                return 10;
+            case 14:
+                return 15;
+            case 15:
+                return 16;
+            case 19:
+            case 23:
+                return 9;
+            case 20:
+                return 7;
+            case 22:
+                return 5;
+            case 24:
+            case 27:
+                return 8;
+            case 25:
+                return 21;
+            case 26:
+                return 17;
+            case 29:
+                return 19;
+            case 30:
+            case 31:
+                return 13;
+            case 32:
+            case 46:
+            case 47:
+            case 48:
+            case 49:
+            case 50:
+            case 52:
+                return 23;
+            case 33:
+            case 34:
+            case 35:
+            case 36:
+            case 37:
+            case 38:
+            case 39:
+            case 40:
+            case 41:
+            case 42:
+            case 43:
+            case 44:
+                return 25;
+            case 45:
+                return 24;
+            case 51:
+                return 26;
+        }
+        return 1;
+    }
+
+    static int GetDefaultSecondPassStateHandlerIndex(int type) {
+        switch (type)
+        {
+            case 3:
+            case 4:
+                return 17;
+            case 5:
+                return 18;
+            case 6:
+                return 27;
+            case 7:
+                return 28;
+            case 8:
+                return 40;
+            case 9:
+                return 6;
+            case 10:
+                return 20;
+            case 11:
+                return 22;
+        }
+        return 0;
+    }
+
+    int GetFirstPassStateHandlerIndex(int type) {
+        auto handler = &g_FirstPassHandlers[type];
+
+        if (*handler == 0)
+            *handler = GetDefaultFirstPassStateHandlerIndex(type);
+
+        return *handler;
+    }
+
+    int GetSecondPassStateHandlerIndex(int type) {
+        auto handler = &g_SecondPassHandlers[type];
+
+        // this will constantly get set if the default state is zero
+        if (*handler == 0)
+            *handler = GetDefaultSecondPassStateHandlerIndex(type);
+
+        return *handler;
+    }
+
+    int SetFirstPassSamplerStates(int type, int /* state */) {
+        // TODO
+    }
+
+    int SetSecondPassRenderState(int type, int state) {
+        return fiero::as<d3dStateManager>::func<int, int, int>(0x5DFDA0)(pD3DStateManager, type, state);
+    }
+
+    int SetSecondPassTextureStageState(int type, int state) {
+        return fiero::as<d3dStateManager>::func<int, int, int>(0x5DFF20)(pD3DStateManager, type, state);
+    }
+
+    int SetSecondPassSamplerState(int type, int state) {
+        return fiero::as<d3dStateManager>::func<int, int, int>(0x5DFE50)(pD3DStateManager, type, state);
+    }
+
+    static bool Install() {
+        if (gameversion != __DRIV3R_V100) {
+            HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS();
+            return false;
+        }
+
+        InstallCallback("renderer::registerStateParams",
+            &registerStateParams, {
+                cbHook<CALL>(0x5DAF65),
+            }
+        );
+
+        InstallCallback("renderer::setStateParams",
+            &setStateParams, {
+                cbHook<JMP>(0x5D7210),
+            }
+        );
+
+        InstallCallback("renderer::GetFirstPassStateHandlerIndex",
+            &GetFirstPassStateHandlerIndex, {
+                cbHook<CALL>(0x5DF29D),
+            }
+        );
+
+        InstallCallback("renderer::GetSecondPassStateHandlerIndex",
+            &GetSecondPassStateHandlerIndex, {
+                cbHook<CALL>(0x5DF2EF),
+            }
+        );
+
+        /*
+            implement patch 2 behavior;
+            call the d3dStateManager directly, bypassing the 'type < 41' check
+        */
+
+        // the game doesn't like this very much
+        //--InstallCallback("renderer::SetSecondPassRenderState",
+        //--    &SetSecondPassRenderState, {
+        //--        cbHook<CALL>(0x5DF30F)
+        //--    }
+        //--);
+        //--
+        //--InstallCallback("renderer::SetSecondPassTextureStageState",
+        //--    &SetSecondPassTextureStageState, {
+        //--        cbHook<CALL>(0x5DF31E)
+        //--    }
+        //--);
+        //--
+        //--InstallCallback("renderer::SetSecondPassSamplerState",
+        //--    &SetSecondPassSamplerState, {
+        //--        cbHook<CALL>(0x5DF32D)
+        //--    }
+        //--);
+
+        return true;
+    }
+};
+
+class IFramework {};
+
+intptr_t fnFrameworkRun;
+
+class FrameworkHandler : public IFramework {
+public:
+    void Run() {
+        bool subclassWindow = true;
+
+        if (subclassWindow)
+        {
+            LogFile::Write("Subclassing window...");
+
+            if (SubclassGameWindow(pDriv3r->GetMainWindow(), WndProcNew, &hProcOld))
+                LogFile::Write("Done!\n");
+            else
+                LogFile::Write("FAIL!\n");
+        }
+
+        //pD3D = pDriv3r->GetD3D();
+        pD3DDevice = pDriv3r->GetD3DDevice();
+
+        if (pD3DDevice != NULL)
+        {
+            LOG("Successfully retrieved the D3D device pointer!");
+
+            pD3DDeviceHook = new IDirect3DDevice9Hook;
+            pDriv3r->SetD3DDevice(pD3DDeviceHook);
+        }
+        else
+        {
+            LOG("Could not retrieve the D3D device pointer!");
+        }
+
+        pUserCmdProxy = pDriv3r->GetUserCommandProxy();
+    
+        if (pUserCmdProxy != NULL)
+        {
+            pUserCmdProxyHook = AutoHook::Create<IUserCommandProxyHook>(pUserCmdProxy);
+            pDriv3r->SetUserCommandProxy(pUserCmdProxyHook);
+        
+            LOG("Successfully hooked into the user command proxy!");
+        }
+        else
+        {
+            LOG("Could not retrieve the user command proxy!");
+        }
+
+        LogFile::AppendLine();
+
+        /*
+        if (gameversion == __DRIV3R_V120)
+        {
+            LOG("Loading menu from memory...");
+
+            HWND gameHwnd = pDriv3r->GetMainWindowHwnd();
+            HMENU hMenu = LoadMenuIndirect((MENUTEMPLATE*)0x8E6BA0);
+
+            if (hMenu != NULL && IsMenu(hMenu)) {
+                LOG("Successfully loaded menu from memory!");
+
+                //if (SetMenu(gameHwnd, hMenu) != NULL) {
+                //    LOG("Successfully set the menu!");
+                //} else {
+                //    LOG("FAILED to set the menu!");
+                //}
+            }
+            else {
+                LOG("FAILED to load menu from memory!");
+            }
+        }
+        */
+
+        auto framework = hamster::GetSingletonObject<IFramework *>(SOBJ_FRAMEWORK);
+
+        reinterpret_cast<MemberCall<void, IFramework> &>(fnFrameworkRun)(framework);
+    };
+
+    static bool Install()
+    {
+        InstallCallback("Hooks into the game framework.", &Run, addressof<CALL>(0x5B7B2C, 0x576E0B), &fnFrameworkRun);
+
+        if (gameversion == __DRIV3R_V120) {
+            // DUDE, THIS FUCKING GAME
+            InstallPatch({
+                0xFF, 0x05, 0x44, 0xFA, 0x8A, 0x00,     // inc g_bGameRunning (saves us the 1 byte we lost)
+                0x8B, 0x0D, 0x58, 0xC2, 0x8A, 0x00,     // mov ecx, pFramework
+            }, { 0x576DFF });
+
+            InstallPatch({
+                0x8B, 0xF9,                             // mov edi, ecx
+            }, { 0x571D84 });
+        }
+
+        return true;
+    }
+};
+
+// TODO: make this configurable
+static bool g_bIsWindowed = false;
+
+static BOOL WindowUpdated(HWND hWnd, int width, int height, bool repaint) {
+    if (g_bIsWindowed)
+    {
+        HDC hDC = GetDC(NULL);
+        int screenWidth = GetDeviceCaps(hDC, HORZRES);
+        int screenHeight = GetDeviceCaps(hDC, VERTRES);
+        ReleaseDC(0, hDC);
+
+        int x = (screenWidth - width) / 2;
+        int y = (screenHeight - height) / 2;
+
+        int captionHeight = GetSystemMetrics(SM_CYCAPTION);
+
+        return MoveWindow(hWnd, x, y, width, height + captionHeight, repaint);
+    }
+
+    return FALSE;
+}
+
+static BOOL WindowUpdated(HWND hWnd) {
+    if (g_bIsWindowed)
+    {
+        RECT rect;
+        GetWindowRect(hWnd, &rect);
+
+        int width = rect.right - rect.left;
+        int height = rect.bottom - rect.top;
+
+        LogFile::Format("Updating window (%dx%d)\n", width, height);
+        return WindowUpdated(hWnd, width, height, false);
+    }
+
+    return FALSE;
+}
+
+LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg) {
+    case WM_DESTROY:
+    {
+        /*
+            Free anything up as needed
+        */
+    } break;
+
+    case WM_KEYUP:
+    {
+        if (HandleKeyPress((DWORD)wParam))
+            return 0;
+    } break;
+    }
+
+    return CallWindowProc(hProcOld, hWnd, uMsg, wParam, lParam);
+}
+
+class HamsterViewport {
+protected:
+    int         MultiSampleType;
+    HRESULT     MultiSampleQuality;
+    char        field_8;
+    bool        AntiAliasingEnabled;
+    int         TextureFilter;
+    char        field_10;
+    bool        DriverManagementDisabled;
+    UINT        Adapter;
+    D3DCAPS9    D3DCaps;
+    HWND        Hwnd;
+    bool        Windowed;
+    int         ColorDepth;
+    IDirect3D9 *IDirect3D9;
+    IDirect3DDevice9
+               *IDirect3DDevice9;
+    D3DDEVTYPE  D3DDevType;
+    D3DPRESENT_PARAMETERS
+                D3DPresentParameters;
+    int         FocusWindow;
+};
+
+intptr_t cbUpdateDevices;
+intptr_t cbUpdateWindow;
+intptr_t cbSetWindowSize;
+
+/*
+    NOT COMPATIBLE WITH PATCH 2
+*/
+class HamsterViewportHandler : public HamsterViewport {
+public:
+    HRESULT UpdateDevices() {
+        if (this->Windowed)
+            WindowUpdated(this->Hwnd);
+
+        return fiero::as<HamsterViewport>::func<HRESULT>(cbUpdateDevices)(this);
+    }
+
+    static bool Install() {
+        if (gameversion != __DRIV3R_V100) {
+            HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS();
+            return false;
+        }
+
+        InstallCallback("Updates the window upon initialization.",
+            &UpdateDevices, cbHook<CALL>(0x5AF06C), &cbUpdateDevices);
+
+        return true;
+    }
+};
+
+class WindowedModeHandler {
+public:
+    bool SetActiveDisplayMode(void *params) {
+        if (g_bIsWindowed)
+        {
+            fiero::Type<HWND> hWnd(0x7F8340);
+
+            struct display_settings {
+                int display_bpp;
+                wchar_t display_res_text[32];
+                int display_res_width;
+                int display_res_height;
+                int display_refresh_rate;
+                int display_format;
+            };
+
+            auto info = reinterpret_cast<display_settings *>(params);
+
+            WindowUpdated(hWnd, info->display_res_width, info->display_res_height, true);
+        }
+
+        return true;
+    }
+
+    static bool Install() {
+        if (gameversion != __DRIV3R_V100) {
+            HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS();
+            return false;
+        }
+
+        InstallCallback("Updates the window when the display mode has changed.",
+            &SetActiveDisplayMode, {
+                cbHook<JMP>(0x57C756),
+            }
+        );
+
+        // windowed mode! :D
+        mem::write<uint32_t>(0x5B799F + 1, WS_POPUP | WS_CAPTION | WS_SYSMENU);
+
+        // initialize/update in windowed mode
+        mem::write<uint8_t>(0x5A5F03 + 1, 1);
+        mem::write<uint8_t>(0x5AEFD7 + 4, 1);
+
+        // *sigh*
+        mem::write<uint8_t, uint8_t>(0x5A5E85, 0x90, 0x90);
+        mem::write<uint8_t, uint8_t>(0x5A5EE0, 0x90, 0x90);
+        mem::write<uint8_t, uint8_t>(0x5D4A10, 0x90, 0x90);
+        mem::write<uint8_t, uint8_t>(0x5D4A1C, 0x90, 0x90);
+
+        // TODO: make this configurable
+        g_bIsWindowed = true;
+
+        return true;
+    }
+};
+
+class PatchHandler {
+protected:
+    static void Install_V100() {
+        // fix the damn z-fighting!!!
+        mem::write(0x5A9B40, -1.3275f);
+
+        // fix shiny tanner!
+        // add a special jump case for shader type 33
+        // put it just past the jump lookup table ;)
+        mem::write<uint32_t>(0x5EC624, 0x5EC5CA);
+
+        // the jump table is at 0x5EC5F0, and our special case is at 0x5EC624
+        // therefore, we need an index of 13
+        mem::write<uint8_t>(0x5EC600 + 33, 13);
+    }
+
+    static void Install_V120() {
+
+    }
+
+    static void InstallShared() {
+        // set a minimum display resolution
+        static const int m_width = 1024;
+        static const int m_height = 768;
+
+        // height
+        mem::write({
+            addressof(0x57C5EA + 1, 0x54A5AA + 1),
+            addressof(0x5AEF23 + 1, 0x57F66F + 1),
+            addressof(0x5AEFA1 + 4, 0x57F6E7 + 4),
+            addressof(0x5B7993 + 1, 0x576C6B + 1),
+            addressof(0x5D46C8 + 1, 0x5C9292 + 1),
+            }, m_height);
+
+        // width
+        mem::write({
+            addressof(0x57C5EF + 1, 0x54A5AF + 1),
+            addressof(0x5AEF28 + 1, 0x57F674 + 1),
+            addressof(0x5AEF99 + 4, 0x57F6DF + 4),
+            addressof(0x5B7998 + 1, 0x576C70 + 1),
+            addressof(0x5D46CD + 1, 0x5C9297 + 1),
+            }, m_width);
+
+        // fixes shiny wheels/interiors
+        // ...but in patch 2, EVERYTHING IS SHINY AT NIGHT!?
+        mem::write<uint8_t>(addressof(0x5EC600 + 28, 0x5E1058 + 28), 1);
+
+        // turn off the high beams :P
+        mem::write(addressof(0x7E261C, 0x7E5F00), 90.0f);
+
+        // fixes shiny wheels/interiors
+        // ...but in patch 2, EVERYTHING IS SHINY AT NIGHT!?
+        mem::write<uint8_t>(addressof(0x5EC600 + 28, 0x5E1058 + 28), 1);
+
+        // turn off the high beams :P
+        mem::write(addressof(0x7E261C, 0x7E5F00), 90.0f);
+    }
+public:
+    static bool Install() {
+        LogFile::WriteLine("[CompatHandler] Installing shared patches...");
+        InstallShared();
+
+        switch (gameversion) {
+        case __DRIV3R_V100:
+            LogFile::WriteLine("[CompatHandler] Installing vanilla patches...");
+            Install_V100();
+            break;
+        case __DRIV3R_V120:
+            LogFile::WriteLine("[CompatHandler] Installing patch 2 patches...");
+            Install_V120();
+            break;
+        }
+
+        return true;
+    }
+};
+
+static intptr_t _WinMainCallback;
+
+class HookSystemHandler
+{
+    static void InstallHandlers() {
+        LogFile::WriteLine("Installing handlers...");
+
+        /*
+            Initialize the important handlers first
+        */
+
+        InstallHandler<FrameworkHandler>("Main framework");
+        InstallHandler<PatchHandler>("Patching framework");
+        InstallHandler<WindowedModeHandler>("Windowed mode");
+        
+        /*
+            Now install everything else
+        */
+
+        InstallHandler<rendererHandler>("renderer");
+        InstallHandler<d3dStateManager>("d3dStateManager");
+        InstallHandler<effectManagerHandler>("effectManager");
+        InstallHandler<DrawListHandler>("DrawList");
+
+        InstallHandler<HamsterViewportHandler>("HamsterViewport");
+
+        init_base::RunAll();
+    }
+
+    static void InstallPatches() {
+        LogFile::WriteLine("Installing patches...");
+
+        switch (gameversion)
+        {
+            case __DRIV3R_V100:
+            {
+                
+            } break;
+            case __DRIV3R_V120:
+            {
             
-        } break;
+            } break;
+        }
     }
-};
+protected:
+    // this fucking game, man....
+    static int __stdcall Initialize(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+        LogFile::WriteLine("Initializing the hook framework...");
 
-DWORD lpInitialise;
-DWORD lpUninitialise;
+        // initialize game module info
+        if (!fxModule::Initialize(mymodule, hInstance))
+            LogFile::WriteLine("Couldn't initialize the game's module info!");
 
-void NAKED HookInitialize() {
-    SetupHooks();
+        InstallPatches();
+        InstallHandlers();
 
-    __asm jmp dword ptr ds : lpInitialise;
-}
-
-void NAKED HookUninitialize() {
-    __asm jmp dword ptr ds : lpUninitialise;
-}
-
-void HookFramework(int gameVersion) {
-    DWORD vtFrameworkPtr = 0;
-
-    switch (gameVersion)
-    {
-        case __DRIV3R_V100:
-        {
-            vtFrameworkPtr = 0x6F7480;
-        } break;
-        case __DRIV3R_V120:
-        {
-            vtFrameworkPtr = 0x788D1C;
-        } break;
+        LogFile::WriteLine("Returning control to the game...");
+        return reinterpret_cast<decltype(WinMain) *>(_WinMainCallback)(hInstance, hPrevInstance, lpCmdLine, nShowCmd);
     }
+public:
+    static bool Install() {
+        InstallCallback("Allows the hook to initialize before the game runs.",
+            &Initialize, addressof<CALL>(0x5F053C, 0x5E5B04), &_WinMainCallback);
 
-    // hook into the framework
-    InstallVTHook(vtFrameworkPtr + 4, (DWORD)&HookInitialize, &lpInitialise);
-    InstallVTHook(vtFrameworkPtr + 8, (DWORD)&HookUninitialize, &lpUninitialise);
-    LogFile::WriteLine("Successfully hooked into the framework!");
+        /*
+            IMPORTANT:
+            Add any patches/callbacks here that must be initialized prior to the game's entry point.
+            This should be used for very very advanced callbacks/patches only!
+        */
+
+        return true;
+    }
 };
 
 //
 // Initialize all the important stuff prior to Driv3r starting up
 //
-void Initialize(int gameVersion) {
-    // first hook into the framework
-    HookFramework(gameVersion);
+void Initialize(RSDSEntry &gameInfo) {
+    gameversion = gameInfo.version;
 
-    InstallPatches(gameVersion);
+    // initialize game manager
+    pDriv3r = new CDriv3r(gameversion);
 
-    // now install all of our non-class based hooks
-    HookSystem::Initialize(gameVersion);
+    HookSystemHandler::Install();
 }
 
+bool IsGameSupported(RSDSEntry &gameInfo) {
+    LogFile::WriteLine("Checking for known Driv3r versions...");
+
+    if (CDriv3r::GetGameInfo(gameInfo))
+    {
+        LogFile::Format(" - Detected game version %1.2f\n", gameInfo.fancy_version);
+        return gameInfo.isSupported;
+    } else {
+        LogFile::WriteLine("Unknown module detected! Terminating...");
+        MessageBox(NULL, "Unknown module! D3Hook will now terminate the process.", "D3Hook", MB_OK | MB_ICONERROR);
+
+        ExitProcess(EXIT_FAILURE);
+    }
+
+    return false;
+}
+
+static void GetAddressName(char *buffer, size_t bufferSize, intptr_t address)
+{
+    bool unknown = true;
+
+    module_info_t meminfo;
+    mymodule.GetModuleInfo(meminfo);
+
+    if (meminfo.instance != nullptr) {
+        if ((address >= meminfo.begin) && (address <= meminfo.end)) {
+            intptr_t relAddr = (address - meminfo.begin);
+
+            sprintf(buffer, "%08X (D3Hook+%08X)", address, relAddr);
+
+            unknown = false;
+        }
+    }
+
+    if (unknown)
+        sprintf_s(buffer, bufferSize, "%08X (Unknown)", address);
+}
+
+LONG WINAPI CustomUnhandledExceptionFilter(LPEXCEPTION_POINTERS ExceptionInfo)
+{
+    if (!ExceptionInfo || !ExceptionInfo->ExceptionRecord)
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    auto record = ExceptionInfo->ExceptionRecord;
+
+    auto address = record->ExceptionAddress;
+    auto code = record->ExceptionCode;
+    auto flags = record->ExceptionFlags;
+
+    char buffer[512] = { NULL };
+    GetAddressName(buffer, sizeof(buffer), reinterpret_cast<intptr_t>(address));
+
+    LogFile::Format("[CRASH] %08X at %s : %X : %p (%d)\n", code, buffer, flags,
+        record->ExceptionInformation, record->NumberParameters);
+
+    char message[512] = { NULL };
+    sprintf_s(message, "The game has crashed at %s. Press OK to continue execution.", buffer);
+
+    MessageBox(NULL, message, "D3Hook", MB_ICONERROR | MB_OK);
+
+    if (record->NumberParameters > 0)
+        RaiseException(code, flags, record->NumberParameters, record->ExceptionInformation);
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
@@ -1085,44 +2117,45 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     {
         case DLL_PROCESS_ATTACH:
         {
-            LogFile::WriteLine("D3Hook initialized.");
+            LogFile::WriteLine("Initializing D3Hook...");
+
+            // setup the current directory
+            InitPath();
+
+            MessageBox(NULL, "Attach a debugger and press OK to continue.", "D3Hook", MB_ICONINFORMATION | MB_OK);
+
+            SetErrorMode(0);
+            SetUnhandledExceptionFilter(CustomUnhandledExceptionFilter);
+
+            // initialize module info
+            if (!fxModule::Initialize(mymodule, hModule))
+                LogFile::WriteLine("Couldn't initialize the module info!");
+
+            LogFile::Format("Working directory is '%s'\n", gamedir);
 
             HMODULE hDI8Module = NULL;
             RSDSEntry gameInfo;
 
-            LogFile::WriteLine("Checking for known Driv3r versions...");
-            if (CDriv3r::GetGameInfo(gameInfo))
+            if (IsGameSupported(gameInfo))
             {
-                LogFile::Format(" - Detected game version V%1.2f\n", gameInfo.fancy_version);
-
-                if (gameInfo.isSupported)
+                if (LoadSystemLibrary("dinput8.dll", &hDI8Module) &&
+                    GetHookProcAddress(hDI8Module, "DirectInput8Create", (FARPROC*)&lpDI8Create))
                 {
-                    if (LoadSystemLibrary("dinput8.dll", &hDI8Module) &&
-                        GetHookProcAddress(hDI8Module, "DirectInput8Create", (FARPROC*)&lpDI8Create))
-                    {
-                        // initialize game manager
-                        pDriv3r = new CDriv3r(gameInfo.version);
+                    LogFile::WriteLine("Injected into the game process successfully.");
 
-                        LogFile::WriteLine("Successfully injected into Driv3r!");
-                        Initialize(gameInfo.version);
-                    }
-                    else
-                    {
-                        LogFile::WriteLine("Failed to inject into Driv3r!");
-                    }
+                    // initialize the hook
+                    Initialize(gameInfo);
                 }
                 else
                 {
-                    LogFile::WriteLine("Unsupported game version! Terminating...");
-                    MessageBox(NULL, "Sorry, this version of Driv3r is unsupported. Please remove D3Hook to launch the game.", "D3Hook", MB_OK | MB_ICONERROR);
-
-                    ExitProcess(EXIT_FAILURE);
+                    LogFile::WriteLine("Failed to inject into the game process.");
+                    MessageBox(NULL, "Could not inject into the game process. Unknown errors may occur.", "D3Hook", MB_OK | MB_ICONWARNING);
                 }
             }
             else
             {
-                LogFile::WriteLine("Unknown module detected! Terminating...");
-                MessageBox(NULL, "Unknown module! D3Hook will now terminate the process.", "D3Hook", MB_OK | MB_ICONERROR);
+                LogFile::WriteLine("Unsupported game version! Terminating...");
+                MessageBox(NULL, "Sorry, this version of Driv3r is unsupported. Please remove D3Hook to launch the game.", "D3Hook", MB_OK | MB_ICONERROR);
 
                 ExitProcess(EXIT_FAILURE);
             }
