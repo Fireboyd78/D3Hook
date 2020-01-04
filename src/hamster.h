@@ -13,8 +13,6 @@
 #include "FileChunker.h"
 #include "IUserCommandProxy.h"
 
-enum HA_SOBJ_TYPE;
-
 enum HA_ADDR_TYPE {
     HA_ADDR_WINDOW,
     HA_ADDR_VIEWPORT,
@@ -27,6 +25,8 @@ enum HA_ADDR_TYPE {
 };
 
 namespace hamster {
+    enum class ESingletonType;
+
     template <typename TValuePtr = void, typename TValue = intptr_t>
     class CAutoPtr {
     protected:
@@ -80,13 +80,12 @@ namespace hamster {
         constexpr bool operator>=(const TAutoPtr &rhs) const        { return value >= rhs.value; }
     };
 
-    DWORD GetPointer(HA_ADDR_TYPE type);
-    void SetPointer(HA_ADDR_TYPE type, DWORD value);
+    /*
+        Pointers
+    */
 
-    DWORD GetSingletonObject(HA_SOBJ_TYPE index);
-    void SetSingletonObject(HA_SOBJ_TYPE index, DWORD ptr);
-
-    DWORD GetSingletonObjectsPointer(void);
+    intptr_t GetPointer(HA_ADDR_TYPE type);
+    void SetPointer(HA_ADDR_TYPE type, intptr_t value);
 
     template <typename TType>
     constexpr inline TType GetPointer(HA_ADDR_TYPE type) {
@@ -98,14 +97,26 @@ namespace hamster {
         return SetPointer(type, (DWORD)value);
     }
 
-    template <typename TType>
-    constexpr inline TType GetSingletonObject(HA_SOBJ_TYPE index) {
-        return reinterpret_cast<TType>(GetSingletonObject(index));
+    static HWND GetMainWindow(void)                             { return hamster::GetPointer<HWND>(HA_ADDR_WINDOW); };
+
+    static IDirect3D9* GetD3D(void)                             { return hamster::GetPointer<IDirect3D9*>(HA_ADDR_DIRECT3D); };
+    static void SetD3D(IDirect3D9 *pD3d)                        { hamster::SetPointer(HA_ADDR_DIRECT3D, pD3d); };
+
+    static IDirect3DDevice9* GetD3DDevice(void)                 { return hamster::GetPointer<IDirect3DDevice9*>(HA_ADDR_DIRECT3D_DEVICE); };
+    static void SetD3DDevice(IDirect3DDevice9 *pD3dDevice)      { hamster::SetPointer(HA_ADDR_DIRECT3D_DEVICE, pD3dDevice); };
+
+    /*
+        Singletons
+    */
+
+    intptr_t * GetSingletonObjectsPointer(void);
+
+    inline intptr_t GetSingletonObject(ESingletonType index) {
+        return GetSingletonObjectsPointer()[static_cast<int>(index)];
     }
 
-    template <typename TType>
-    constexpr inline void SetSingletonObject(HA_SOBJ_TYPE index, TType *value) {
-        SetSingletonObject(index, (DWORD)value);
+    inline void SetSingletonObject(ESingletonType index, intptr_t value) {
+        GetSingletonObjectsPointer()[static_cast<int>(index)] = value;
     }
 }
 

@@ -192,7 +192,7 @@ bool HandleKeyPress(DWORD vKey)
             LOG("Dumping shaders...");
 
             char shadersDir[MAX_PATH] = { NULL };
-            char *appPath = hook::VTHook(hamster::GetSingletonObject(SOBJ_SYSTEMCONFIG))[16].Call<char*>();
+            char *appPath = hook::VTHook(hamster::GetSingletonObject(hamster::ESingletonType::SystemConfig))[16].Call<char*>();
 
             char *shadersVer = (gameversion == __DRIV3R_V100) ? "v100" : "v120";
 
@@ -270,7 +270,7 @@ bool HandleKeyPress(DWORD vKey)
 
                         if (shader.type != -1)
                         {
-                            if (D3DXCreateEffect(pDriv3r->GetD3DDevice(), (LPCVOID)offset, size, NULL, NULL, D3DXSHADER_NO_PRESHADER, NULL, &pEffect, &outBuffer) == D3D_OK)
+                            if (D3DXCreateEffect(hamster::GetD3DDevice(), (LPCVOID)offset, size, NULL, NULL, D3DXSHADER_NO_PRESHADER, NULL, &pEffect, &outBuffer) == D3D_OK)
                             {
                                 if (D3DXDisassembleEffect(pEffect, FALSE, &outBuffer) == D3D_OK)
                                 {
@@ -369,15 +369,15 @@ bool HandleKeyPress(DWORD vKey)
         }
         case VK_F8:
         {
-            auto addr = (DWORD **)hamster::GetSingletonObjectsPointer();
+            auto addr = (intptr_t **)hamster::GetSingletonObjectsPointer();
 
-            for (int i = 0; i < SOBJ_COUNT; i++) {
+            for (int i = 0; i < static_cast<int>(hamster::ESingletonType::MAX_COUNT); i++) {
                 auto ptr = &addr[i];
 
                 if (*ptr == nullptr)
                     continue;
 
-                LogFile::Format("singleton[%02X] @ %08X : %08X -> %08X\n", i, (DWORD)ptr, *ptr, **ptr);
+                LogFile::Format("singleton[%02X] @ %08X : %08X -> %08X\n", i, ptr, *ptr, **ptr /* vtable */);
             }
 
             return true;
@@ -555,7 +555,7 @@ protected:
             }
             else
             {
-                MessageBox(pDriv3r->GetMainWindow(), "FATAL ERROR: Cannot open the shaders file!", "D3Hook", MB_OK | MB_ICONERROR);
+                MessageBox(hamster::GetMainWindow(), "FATAL ERROR: Cannot open the shaders file!", "D3Hook", MB_OK | MB_ICONERROR);
                 return E_FAIL;
             }
 
@@ -1618,8 +1618,6 @@ public:
     }
 };
 
-class IFramework {};
-
 intptr_t fnFrameworkRun;
 
 class FrameworkHandler : public IFramework {
@@ -1631,33 +1629,33 @@ public:
         {
             LogFile::Write("Subclassing window...");
 
-            if (SubclassGameWindow(pDriv3r->GetMainWindow(), WndProcNew, &hProcOld))
+            if (SubclassGameWindow(hamster::GetMainWindow(), WndProcNew, &hProcOld))
                 LogFile::Write("Done!\n");
             else
                 LogFile::Write("FAIL!\n");
         }
 
-        //pD3D = pDriv3r->GetD3D();
-        pD3DDevice = pDriv3r->GetD3DDevice();
+        //pD3D = hamster::GetD3D();
+        pD3DDevice = hamster::GetD3DDevice();
 
         if (pD3DDevice != NULL)
         {
             LOG("Successfully retrieved the D3D device pointer!");
 
             pD3DDeviceHook = new IDirect3DDevice9Hook;
-            pDriv3r->SetD3DDevice(pD3DDeviceHook);
+            hamster::SetD3DDevice(pD3DDeviceHook);
         }
         else
         {
             LOG("Could not retrieve the D3D device pointer!");
         }
 
-        pUserCmdProxy = pDriv3r->GetUserCommandProxy();
+        pUserCmdProxy = hamster::UserCommandProxy::Get();
     
         if (pUserCmdProxy != NULL)
         {
             pUserCmdProxyHook = AutoHook::Create<IUserCommandProxyHook>(pUserCmdProxy);
-            pDriv3r->SetUserCommandProxy(pUserCmdProxyHook);
+            hamster::UserCommandProxy::Set(pUserCmdProxyHook);
         
             LOG("Successfully hooked into the user command proxy!");
         }
@@ -1673,7 +1671,7 @@ public:
         {
             LOG("Loading menu from memory...");
 
-            HWND gameHwnd = pDriv3r->GetMainWindowHwnd();
+            HWND gameHwnd = hamster::GetMainWindowHwnd();
             HMENU hMenu = LoadMenuIndirect((MENUTEMPLATE*)0x8E6BA0);
 
             if (hMenu != NULL && IsMenu(hMenu)) {
@@ -1691,7 +1689,7 @@ public:
         }
         */
 
-        auto framework = hamster::GetSingletonObject<IFramework *>(SOBJ_FRAMEWORK);
+        auto framework = hamster::Framework::Get();
 
         reinterpret_cast<MemberCall<void, IFramework> &>(fnFrameworkRun)(framework);
     };

@@ -6,6 +6,9 @@
 
 #define EXPAND( x ) x
 
+// <3 Python
+#define PASS {}
+
 #define ENUMCASE2STR(x) case x: return #x;
 
 #define FASTCALL(method)        void __fastcall method

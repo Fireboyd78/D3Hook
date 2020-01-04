@@ -1,7 +1,5 @@
 #include "driv3r.h"
 
-using namespace hamster;
-
 addr_info g_singleton_objs { { 0x8B8358, 0x8AC230 }, "SingletonObjects" };
 addr_info g_addrs[HA_ADDR_COUNT];
 
@@ -13,24 +11,16 @@ intptr_t addressof(addr_info &info) {
 }
 
 namespace hamster {
-    DWORD GetPointer(HA_ADDR_TYPE type) {
-        return *(DWORD*)g_addrs[type].offsets[g_GameVersion];
+    intptr_t GetPointer(HA_ADDR_TYPE type) {
+        return *(intptr_t*)g_addrs[type].offsets[g_GameVersion];
     }
 
-    void SetPointer(HA_ADDR_TYPE type, DWORD value) {
-        *(DWORD*)g_addrs[type].offsets[g_GameVersion] = value;
+    void SetPointer(HA_ADDR_TYPE type, intptr_t value) {
+        *(intptr_t*)g_addrs[type].offsets[g_GameVersion] = value;
     };
 
-    DWORD GetSingletonObject(HA_SOBJ_TYPE index) {
-        return reinterpret_cast<DWORD *>(g_singleton_objs.offsets[g_GameVersion])[index];
-    }
-
-    void SetSingletonObject(HA_SOBJ_TYPE index, DWORD value) {
-        reinterpret_cast<DWORD *>(g_singleton_objs.offsets[g_GameVersion])[index] = value;
-    }
-
-    DWORD GetSingletonObjectsPointer(void) {
-        return g_singleton_objs.offsets[g_GameVersion];
+    intptr_t * GetSingletonObjectsPointer(void) {
+        return reinterpret_cast<intptr_t *>(g_singleton_objs.offsets[g_GameVersion]);
     }
 }
 

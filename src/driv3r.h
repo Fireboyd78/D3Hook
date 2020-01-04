@@ -53,61 +53,218 @@ Dear Patch 2:
 #define HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS() \
     LogFile::WriteLine(" - Sorry, Patch 2 is too much of a fucking mess for this.")
 
-/* Singleton object types */
-enum HA_SOBJ_TYPE {
-    SOBJ_FILESYSTEM                         = 0,
-    SOBJ_RENDERER                           = 2,
-    SOBJ_OCCLUDER_MANAGER                   = 5,
-    SOBJ_SYSTEMCONFIG                       = 6,
-    SOBJ_TEXTMANAGER                        = 8,
-    SOBJ_FONTMANAGER                        = 9,
+class IFramework PASS;
 
-    SOBJ_FRAMEWORK                          = 10,
+namespace hamster
+{
+    /*
+        Singleton object types
 
-    SOBJ_USERCOMMANDPROXY                   = 14,
-    SOBJ_MOUSECONTROL                       = 16,
-    
-    SOBJ_SOUND                              = 32,
-    SOBJ_MUSIC                              = 33,
-    SOBJ_LIFE_NODE_COLLECTION               = 39,
-    
-    SOBJ_STRING_COLLECTION                  = 40,
-    SOBJ_ACTIVE_NODE_COLLECTION             = 41,
-    SOBJ_WIRE_COLLECTION_MANAGER            = 42,
-    SOBJ_LIFE_NODE_PROPERTY_STREAM          = 43,
-    SOBJ_SCRIPT_COUNTER_COLLECTION          = 44,
-    SOBJ_ACTIVE_NODE_COLLECTION_MANAGER     = 46,
-    SOBJ_LIFE_NODE_FACTORY                  = 47,
-    SOBJ_LIFE_ACTOR_FACTORY                 = 48,
-    SOBJ_LIFE_ACTOR_PROPERTY_STREAM         = 49,
-    
-    SOBJ_LIFE_ACTOR_COLLECTION              = 50,
-    SOBJ_SOUNDBANK_COLLECTION               = 51,
+          Some of these are spot-on, others are just best-guesses.
+          Also, it's a /nightmare/ to look at.
+        
+          At least someone re-organized them for Driver: Parallel Lines :)
 
-    SOBJ_GAME                               = 55,
-    
-    SOBJ_VEHICLE_SPEC_MANAGER               = 80,
-    SOBJ_VO3MANAGER                         = 81,
-    SOBJ_DRIVE_TYPE_LOOKUP                  = 89,
-    
-    SOBJ_CITY_SPOOL_BUFFER                  = 94,
-    SOBJ_INITIALISATION_DATA                = 95,
-    SOBJ_MENU_MANAGER                       = 96,
-    SOBJ_GAMEMENU_LINK                      = 97,
-    SOBJ_MENU_SOUND                         = 98,
+        Unknowns:
+         - 21,
+         - 91-93,
+         - 101,
+         - 112, 116, 117, 119-121, 125, 127, 132,
+         - 164,
+         - 184,
+         - 190, 193-195, 199,
+         - 202, 224-226
+    */
+    enum class ESingletonType : int
+    {
+        FileSystem                      = 0,
+        RendererHandler                 = 1,
+        Renderer                        = 2,
+        DebugModel                      = 3,
+        RuntimeModelManager             = 4,
+        OccluderManager                 = 5,
+        SystemConfig                    = 6,
+        TaskManager                     = 7,
+        TextManager                     = 8,
+        FontManager                     = 9,
+        Framework                       = 10,
+        Loop                            = 12,
+        HamsterInitialization           = 13,
+        UserCommandProxy                = 14,
+        MainMenu                        = 15,
+        MouseControl                    = 16,
+        StatusText                      = 17,
+        OSControl                       = 18,
+        Win32Wrapper                    = 19,
 
-    SOBJ_VEHICLE_MANAGER                    = 139,
+        AnimClipsManager                = 20,
+        AnimFile                        = 27,
+        BinaryKeyFrameLoader            = 29,
+        CharacterDataManager            = 30,
+        SoundSystem                     = 31,
+        Sound                           = 32,
+        Music                           = 33,
+        Gamepad                         = 34,
+        MemoryUnit                      = 35,
+        LifeEventDataManager            = 37,
+        LifeSystemCommentLog            = 38,
+        LifeNodeCollection              = 39,
+        StringCollection                = 40,
+        ActiveNodeCollection            = 41,
+        WireCollectionManager           = 42,
+        LifeNodePropertyStream          = 43,
+        ScriptCounterCollection         = 44,
+        ActiveNodeCollectionManager     = 46,
+        LifeNodeFactory                 = 47,
+        LifeActorFactory                = 48,
+        LifeActorPropertyStream         = 49,
+        LifeActorCollection             = 50,
+        SoundBankCollection             = 51,
+        Physics                         = 52,
+        RoadData                        = 53,
+        Game                            = 55,
+        GameRepository                  = 56,
+        AIBehaviourManager              = 57,
+        AIManager                       = 58,
+        AICopCarManager                 = 59,
+        AIFelonySystemManager           = 60,
+        AICivilianCarManager            = 61,
+        AICivilianRoadMap               = 62,
+        MonorailManager                 = 63,
+        TramManager                     = 64,
+        AnimSystem                      = 65,
+        DataManager                     = 66,
+        SpoolDataFactory                = 67,
+        InstanceDataManager             = 68,
+        TerrainDataManager              = 69,
+        SuperRegionPhysicsDataManager   = 70,
+        RegionPhysicsDataManager        = 71,
+        RegionRoutefindManager          = 72,
+        AnimatedObjectDataManager       = 73,
+        AttractorRegionDataManager      = 74,
+        InteriorSceneDataReceiver       = 75,
+        LightingEnvironment             = 76,
+        InteriorInstanceManager         = 77,
+        SceneDataReceiver               = 78,
+        SceneDataManager                = 79,
+        VehicleSpecManager              = 80,
+        VO3Server                       = 81,
+        PropDataManager                 = 82,
+        WaterManager                    = 84,
+        WaterDataManager                = 85,
+        RegionWaterDataManager          = 86,
+        LifeEventData                   = 87,
+        LifeSceneData                   = 88,
+        DriveTypeLookup                 = 89,
+        Personalities                   = 90,
+        CitySpoolBuffer                 = 94,
+        InitialisationData              = 95,
+        MenuManager                     = 96,
+        MenuLink                        = 97,
+        MenuSound                       = 98,
+        MenuMovie                       = 99,
+        LifeSystem                      = 102,
+        LifeSystemSpoolCentre           = 103,
+        ExtraCreationDataManager        = 104,
+        LifeVisuals                     = 105,
+        Environment                     = 106,
+        CharacterTargetManager          = 107,
+        CharacterCategoryManager        = 108,
+        LifeSystemChaseTargets          = 111,
+        TargetManager                   = 113,
+        LifeEventCreationData           = 114,
+        LifeAcquirableVehicleManager    = 118,
+        TargetWatchList                 = 122,
+        CollisionWatchList              = 123,
+        ParticleFxGFXMemoryManager      = 126,
+        SimulationWrapper               = 128,
+        GameTime                        = 129,
+        AnimatedObjectManager           = 130,
+        GameState                       = 133,
+        TerrainSearch                   = 134,
+        StaticInstanceManager           = 135,
+        FragmentManager                 = 136,
+        PropManager                     = 137,
+        InputManager                    = 138,
+        VehicleManager                  = 139,
+        ResidentArea                    = 140,
+        GameSoundManager                = 141,
+        VehicleSoundManager             = 142,
+        CharacterSoundManager           = 143,
+        ObjectSoundManager              = 144,
+        CollisionSoundManager           = 145,
+        GunSoundManager                 = 146,
+        WheelSoundManager               = 147,
+        AmbientSoundManager             = 148,
+        ReverbSoundManager              = 149,
+        CopSoundManager                 = 150,
+        CDPlayer                        = 151,
+        MusicSystem                     = 152,
+        VehicleSoundSpecManager         = 153,
+        WeaponsStore                    = 154,
+        KillKillKill                    = 155,
+        SFXServer                       = 156,
+        VehicleAcquisition              = 157,
+        MovingObjectManager             = 158,
+        Rumble                          = 159,
+        CharacterManager                = 160,
+        AnimationLookup                 = 161,
+        SpoolManager                    = 162,
+        GenericViewport                 = 165,
+        GameOverlayManager              = 166,
+        State_Main                      = 167,
+        State_Controller                = 168,
+        State_Intro                     = 169,
+        State_GameAssets                = 170,
+        State_Frontend                  = 173,
+        State_FrontendLoader            = 174,
+        State_ChooseCity                = 176,
+        State_MULoadReplay              = 177,
+        State_MULoadSaveProfile         = 178,
+        LifeProgression                 = 179,
+        State_Game                      = 180,
+        LoadState                       = 182,
+        State_GameRunning               = 185,
+        State_GameStalled               = 186,
+        State_FilmDirector              = 188,
+        State_PauseMenu                 = 194,
+        State_MUAutoSave                = 201,
+        State_Reload                    = 204,
+        State_Release                   = 207,
+        State_Movie                     = 209,
+        ControllerStateTree             = 210,
+        InGameMovie                     = 211,
+        LoadingScreen                   = 213,
+        WipeManager                     = 214,
+        ProfileSettings                 = 215,
+        GamepadInterface                = 216,
+        FrontendMusic                   = 217,
+        GenericStringManager            = 218,
+        GlobalTextures                  = 219,
+        AutoSaveHandler                 = 220,
+        MUBootupFlow                    = 222,
+        MULoadSaveProfileFlow           = 223,
+        MUAutoSaveFlow                  = 227,
 
-    SOBJ_VEHICLE_SOUND_SPEC_MANAGER         = 153,
+        /* Number of singleton objects */
+        MAX_COUNT                       = 230
+    };
 
-    SOBJ_PROFILE_SETTINGS                   = 215,
-    SOBJ_FRONTEND_MUSIC                     = 217,
-    SOBJ_GENERIC_STRING_MANAGER             = 218,
+    template <ESingletonType _Type, class _Class = void>
+    class SingletonVar {
+    public:
+        static inline _Class * Get() {
+            return reinterpret_cast<_Class *>(GetSingletonObject(_Type));
+        }
 
-    /* Number of singleton objects */
-    SOBJ_COUNT                              = 230
-};
+        static inline void Set(_Class *value) {
+            SetSingletonObject(_Type, reinterpret_cast<intptr_t>(value));
+        }
+    };
 
+    using Framework = SingletonVar<ESingletonType::Framework, IFramework>;
+    using UserCommandProxy = SingletonVar<ESingletonType::UserCommandProxy, IUserCommandProxy>;
+}
 /*
 //
 // Known addresses
@@ -150,15 +307,4 @@ public:
     };
 
     static int Version();
-
-    HWND GetMainWindow(void)                                    { return hamster::GetPointer<HWND>(HA_ADDR_WINDOW); };
-
-    IDirect3D9* GetD3D(void)                                    { return hamster::GetPointer<IDirect3D9*>(HA_ADDR_DIRECT3D); };
-    void SetD3D(IDirect3D9 *pD3d)                               { return hamster::SetPointer(HA_ADDR_DIRECT3D, pD3d); };
-
-    IDirect3DDevice9* GetD3DDevice(void)                        { return hamster::GetPointer<IDirect3DDevice9*>(HA_ADDR_DIRECT3D_DEVICE); };
-    void SetD3DDevice(IDirect3DDevice9 *pD3dDevice)             { hamster::SetPointer(HA_ADDR_DIRECT3D_DEVICE, pD3dDevice); };
-
-    IUserCommandProxy* GetUserCommandProxy(void)                { return hamster::GetSingletonObject<IUserCommandProxy*>(SOBJ_USERCOMMANDPROXY); };
-    void SetUserCommandProxy(IUserCommandProxy *pUserCmdProxy)  { hamster::SetSingletonObject(SOBJ_USERCOMMANDPROXY, pUserCmdProxy); };
 };

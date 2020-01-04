@@ -3,7 +3,7 @@
 extern CDriv3r *pDriv3r;
 
 IDirect3DDevice9 * GetDirect3DDevice(void) {
-    return pDriv3r->GetD3DDevice();
+    return hamster::GetD3DDevice();
 }
 
 /*
@@ -94,7 +94,7 @@ HRESULT ShaderFX::OnDeviceLost(void) {
 }
 
 HRESULT ShaderFX::LoadFile(LPCSTR pSrcFile, LPD3DXEFFECTPOOL pPool) {
-    auto device = pDriv3r->GetD3DDevice();
+    auto device = GetDirect3DDevice();
 
     auto hr = D3DXCreateEffectFromFile(device,
         pSrcFile,
@@ -110,7 +110,7 @@ HRESULT ShaderFX::LoadFile(LPCSTR pSrcFile, LPD3DXEFFECTPOOL pPool) {
 }
 
 HRESULT ShaderFX::Load(LPVOID pSrcData, UINT srcDataLen, LPD3DXEFFECTPOOL pPool) {
-    auto device = pDriv3r->GetD3DDevice();
+    auto device = GetDirect3DDevice();
 
     auto hr = D3DXCreateEffect(device,
         pSrcData,

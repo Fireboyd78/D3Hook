@@ -20,7 +20,7 @@ protected:
     CVehicleManager *manager;
 public:
     static CIVehicleManager * Get() {
-        return hamster::GetSingletonObject<CIVehicleManager *>(SOBJ_VEHICLE_MANAGER);
+        return hamster::SingletonVar<hamster::ESingletonType::VehicleManager, CIVehicleManager>::Get();
     };
 };
 

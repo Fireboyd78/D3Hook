@@ -3,36 +3,36 @@
 
 class IUserCommand {
 public:
-	virtual void ProcessCommand(const char *command, const char *parameters) PURE;
+	virtual void ProcessCommand(const char *command, const char *parameters) THUNK;
 };
 
 class IUserCommandProxy {
 public:
-    virtual int ˜dtor(bool) PURE;
+    virtual ~IUserCommandProxy() THUNK;
 
-    virtual void Initialise(void) PURE;
-    virtual void RegisterCommand(IUserCommand *) PURE;
-    virtual void UnregisterCommand(IUserCommand *) PURE;
-    virtual void IssueCommand(const char *, IUserCommand *) PURE;
+    virtual void Initialise(void) THUNK;
+    virtual void RegisterCommand(IUserCommand *) THUNK;
+    virtual void UnregisterCommand(IUserCommand *) THUNK;
+    virtual void IssueCommand(const char *, IUserCommand *) THUNK;
 };
 
 class IUserCommandProxyHook : public AutoHook::Type<IUserCommandProxy> {
 public:
-    int IUserCommandProxy::˜dtor(bool free) {
+    ~IUserCommandProxyHook() override {
 #ifdef USERCMDPROXY_DEBUGGING
         LOG("[IUserCommandProxy::Release]");
 #endif
-        return pBase->˜dtor(free);
+        pBase->~IUserCommandProxy();
     };
 
-    void IUserCommandProxy::Initialise(void) {
+    void Initialise(void) override {
 #ifdef USERCMDPROXY_DEBUGGING
         LOG("[IUserCommandProxy::Initialise]");
 #endif
         pBase->Initialise();
     };
 
-    void IUserCommandProxy::RegisterCommand(IUserCommand *userCmd) {
+    void RegisterCommand(IUserCommand *userCmd) override {
 #ifdef USERCMDPROXY_DEBUGGING
         DWORD retAddr = *(DWORD*)(&userCmd - 1);
         LogFile::Format("[IUserCommandProxy::RegisterCommand] (return:0x%X)\n", retAddr);
@@ -40,7 +40,7 @@ public:
         pBase->RegisterCommand(userCmd);
     };
 
-    void IUserCommandProxy::UnregisterCommand(IUserCommand *userCmd) {
+    void UnregisterCommand(IUserCommand *userCmd) override {
 #ifdef USERCMDPROXY_DEBUGGING
         DWORD retAddr = *(DWORD*)(&userCmd - 1);
         LogFile::Format("[IUserCommandProxy::UnegisterCommand] (return:0x%X)\n", retAddr);
@@ -48,7 +48,7 @@ public:
         pBase->UnregisterCommand(userCmd);
     };
 
-    void IUserCommandProxy::IssueCommand(const char *command, IUserCommand *userCmd) {
+    void IssueCommand(const char *command, IUserCommand *userCmd) override {
 #ifdef USERCMDPROXY_DEBUGGING
         if (strlen(command) > 0) {
             DWORD retAddr = *(DWORD*)(&command - 1);

@@ -11,6 +11,10 @@
 
 #define HOOK_PTR pBase
 
+/*
+    TODO:
+    - KILL IT WITH FIRE!!!
+*/
 struct AutoHook
 {
     template <typename TBase>
