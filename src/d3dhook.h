@@ -9,8 +9,8 @@
 #include <d3d9helper.h>
 #include <d3d9types.h>
 
-#include <d3dx9.h>
-
+#include <d3d9.h>
+#include "dxsdk/d3dx9.h"
 #include "common.h"
 
 extern IDirect3D9          *pD3D;

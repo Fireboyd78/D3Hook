@@ -96,7 +96,7 @@ HRESULT ShaderFX::OnDeviceLost(void) {
 HRESULT ShaderFX::LoadFile(LPCSTR pSrcFile, LPD3DXEFFECTPOOL pPool) {
     auto device = GetDirect3DDevice();
 
-    auto hr = D3DXCreateEffectFromFile(device,
+    auto hr = D3DXCreateEffectFromFileA(device,
         pSrcFile,
         NULL,
         NULL,
