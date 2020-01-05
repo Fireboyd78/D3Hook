@@ -47,7 +47,6 @@ void WINAPI GetStartupInfoA_Stub(LPSTARTUPINFOA lpStartupInfo)
 	if (!initGuard) {
 		RSDSEntry gameInfo{};
 		if (CDriv3r::GetGameInfo(gameInfo)) {
-			__debugbreak();
 			LogFile::Format(" - Detected game version %1.2f\n", gameInfo.fancy_version);
 
 			Initialize(gameInfo);
