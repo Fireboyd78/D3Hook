@@ -9,8 +9,11 @@ workspace "D3Mods"
     os.mkdir "build/symbols"
     targetdir 'bin/%{cfg.buildcfg}'
     
+    filter {"action:vs*", "configurations:Debug"}
+        buildoptions "/GF" -- remove duplicate strings
+    
      filter {"system:windows", "kind:not StaticLib"}
-         linkoptions { "/PDB:\"$(SolutionDir)\\symbols\\$(ProjectName)_%{cfg.buildcfg}.pdb\"" }
+        linkoptions { "/PDB:\"$(SolutionDir)\\symbols\\$(ProjectName)_%{cfg.buildcfg}.pdb\"" }
          
      filter "action:vs*"
         defines
@@ -22,15 +25,15 @@ workspace "D3Mods"
         language "C++"
         kind "WindowedApp"
         targetname "D3Hook"
-		editandcontinue "Off"
+        editandcontinue "Off"
         
-		flags { "NoIncrementalLink" }
-		linkoptions "/IGNORE:4254 /DYNAMICBASE:NO /LARGEADDRESSAWARE /LAST:.zdata"
-		
+        flags { "NoIncrementalLink" }
+        linkoptions "/IGNORE:4254 /DYNAMICBASE:NO /LARGEADDRESSAWARE /LAST:.zdata"
+        
         includedirs { 'src' }
-		libdirs { 'src/dxsdk' }
-		
-		links { "d3dx9", "d3d9" }
+        libdirs { 'src/dxsdk' }
+        
+        links { "d3dx9", "d3d9" }
         
         files 
         {
