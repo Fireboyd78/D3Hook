@@ -9,6 +9,8 @@ workspace "D3Mods"
     os.mkdir "build/symbols"
     targetdir 'bin/%{cfg.buildcfg}'
     
+    debugformat "c7" -- oldstyle PDB
+    
     filter {"action:vs*", "configurations:Debug"}
         buildoptions "/GF" -- remove duplicate strings
     
