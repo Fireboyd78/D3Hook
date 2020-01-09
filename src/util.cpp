@@ -42,10 +42,10 @@ bool LoadSystemLibrary(LPCSTR lpDllName, HMODULE *out)
 {
     char szDllFile[MAX_PATH]{ NULL }; // path to system dll
 
-    GetSystemDirectory(szDllFile, sizeof(szDllFile));
+    GetSystemDirectoryA(szDllFile, sizeof(szDllFile));
     sprintf(szDllFile, "%s\\%s", szDllFile, lpDllName);
 
-    if (SUCCEEDED(*out = LoadLibrary(szDllFile)))
+    if (SUCCEEDED(*out = LoadLibraryA(szDllFile)))
     {
         LogFile::Format("Loaded system library \"%s\" => %08X\n", szDllFile, *out);
         return true;
