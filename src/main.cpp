@@ -189,6 +189,9 @@ LONG WINAPI CustomUnhandledExceptionFilter(LPEXCEPTION_POINTERS ExceptionInfo)
     auto code = record->ExceptionCode;
     auto flags = record->ExceptionFlags;
 
+    if (code == STATUS_INVALID_HANDLE)
+        return EXCEPTION_CONTINUE_EXECUTION;
+
     char buffer[512] = { NULL };
     GetAddressName(buffer, sizeof(buffer), reinterpret_cast<intptr_t>(address));
 
@@ -200,10 +203,10 @@ LONG WINAPI CustomUnhandledExceptionFilter(LPEXCEPTION_POINTERS ExceptionInfo)
 
     MessageBoxA(NULL, message, "D3Hook", MB_ICONERROR | MB_OK);
 
-    if (record->NumberParameters > 0)
-        RaiseException(code, flags, record->NumberParameters, record->ExceptionInformation);
+    //if (record->NumberParameters > 0)
+    //    RaiseException(code, flags, record->NumberParameters, record->ExceptionInformation);
 
-    return EXCEPTION_EXECUTE_HANDLER;
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 static LONG NTAPI HandleVariant(PEXCEPTION_POINTERS exceptionInfo)
@@ -305,8 +308,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	auto entry = static_cast<void(*)()>(exeLoader.GetEntryPoint());
 
-	AddVectoredExceptionHandler(0, HandleVariant);
-	SetUnhandledExceptionFilter(CustomUnhandledExceptionFilter);
+	AddVectoredExceptionHandler(1, HandleVariant);
+	AddVectoredContinueHandler(1, CustomUnhandledExceptionFilter);
+
 	invokeEntry(entry);
 	return 0;
 }
