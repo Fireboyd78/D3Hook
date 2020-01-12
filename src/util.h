@@ -230,12 +230,11 @@ bool GetHookProcAddress(HMODULE hModule, LPCSTR lpProcName, FARPROC *out);
 
 bool GetPathSpec(char *path, char *dest, int destLen);
 
+std::wstring makeGamePath(const std::wstring& rel);
+std::wstring makeToolPath(const std::wstring& rel);
+
 inline bool file_exists(LPCSTR filename) {
-    if (auto file = fopen(filename, "r")) {
-        fclose(file);
-        return true;
-    }
-    return false;
+    return GetFileAttributesA(filename) != INVALID_FILE_ATTRIBUTES;
 }
 
 namespace variadic

@@ -1,4 +1,5 @@
 #include "logfile.h"
+#include "util.h"
 
 namespace LogFile {
     bool bCreateLog = true;
@@ -14,9 +15,10 @@ namespace LogFile {
             OutputDebugStringA(str);
         }
 
-        FILE *logFile = fopen("d3hook.log", ((bCreateLog) ? "w" : "a+"));
+        FILE* logFile = nullptr;
+        _wfopen_s(&logFile, makeToolPath(L"\\d3hook.log").c_str(), bCreateLog ? L"w" : L"a+");
 
-        if (logFile == NULL)
+        if (logFile == nullptr)
         {
             debug("Failed to open the log file!");
             return;
