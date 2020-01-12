@@ -549,7 +549,7 @@ protected:
             int errorCode = 0;
 
             LogFile::WriteLine("Loading shaders chunk...");
-            if (shadersChunk.OpenChunks("shaders\\AllShaders.chunk"))
+            if (shadersChunk.OpenChunks("D3Hook:shaders\\AllShaders.chunk"))
             {
                 int nShaders = shadersChunk.GetChunkCount();
 
@@ -1675,15 +1675,138 @@ public:
         //--    }
         //--);
         //--
-        //--InstallCallback("renderer::SetSecondPassSamplerState",
-        //--    &SetSecondPassSamplerState, {
-        //--        cbHook<CALL>(0x5DF32D)
-        //--    }
-        //--);
+//--InstallCallback("renderer::SetSecondPassSamplerState",
+//--    &SetSecondPassSamplerState, {
+//--        cbHook<CALL>(0x5DF32D)
+//--    }
+//--);
+
+return true;
+    }
+};
+
+class CSystemConfigBase {
+public:
+    virtual ~CSystemConfigBase() = default;
+    virtual void m1() = 0;
+    virtual void m2() = 0;
+    virtual void m3() = 0;
+    virtual void m4() = 0;
+    virtual void m5() = 0;
+    virtual void m6() = 0;
+    virtual void m7() = 0;
+    virtual void m8() = 0;
+    virtual void m9() = 0;
+    virtual void m10() = 0;
+    virtual void m11() = 0;
+    virtual void m12() = 0;
+    virtual void m13() = 0;
+    virtual void m14() = 0;
+    virtual void m15() = 0;
+    virtual void m16() = 0;
+    virtual void m17() = 0;
+    virtual void m18() = 0;
+    virtual const char* GetTerritoryString() = 0;
+    virtual void m20() = 0;
+    virtual void m21() = 0;
+    virtual const char* GetTextLanguageString() = 0;
+    virtual void m23() = 0;
+    virtual void m24() = 0;
+    virtual void m25() = 0;
+    virtual const char* GetAudioLanguageString() = 0;
+};
+
+#pragma pack(push, 1) 
+
+template<typename TRet, typename ...Args>
+inline TRet HACK_callthis(LPVOID lpFunc, Args ...args) {
+    return (*(TRet(__thiscall*)(Args...))lpFunc)(args...);
+}
+
+
+class CFileSystemPC {
+
+public:
+
+    char* SearchFile(const char* vPath, char* buffer)
+    {
+		static std::string toolBase;
+		if (toolBase.empty()) {
+			using convert_type = std::codecvt_utf8<wchar_t>;
+			std::wstring_convert<convert_type, wchar_t> converter;
+			toolBase = converter.to_bytes(makeToolPath(L""));
+		}
+
+        auto* config = *(CSystemConfigBase**)0x8B8370;
+
+        // our custom path redirection
+        if (!_strnicmp(vPath, "D3Hook:", 7)) {
+            std::sprintf(buffer, "%s%s", toolBase.c_str(), &vPath[7]);
+        }
+        else if (!_strnicmp(vPath, "TERR:", 5)) {
+            std::sprintf(buffer, "%sTERRITORY\\%s\\%s", gamePath,
+                config->GetTerritoryString(), &vPath[5]);
+        }
+        else if (!_strnicmp(vPath, "LANG:", 5)) {
+            std::sprintf(buffer, "%sTERRITORY\\%s\\LOCALE\\%s\\%s", gamePath,
+                config->GetTerritoryString(),
+                config->GetTextLanguageString(), &vPath[5]);
+        }
+        else if (!_strnicmp(vPath, "AUDIO:", 6)) {
+            std::sprintf(buffer, "%sTERRITORY\\%s\\LOCALE\\%s\\%s", gamePath,
+                config->GetTerritoryString(),
+                config->GetAudioLanguageString(), &vPath[6]);
+        }
+        else if (!_strnicmp(vPath, "LIVE:", 5)) {
+            __debugbreak(); /*are there even any of these*/
+            std::strncpy(buffer, vPath, 260);
+            //return _strupr(buffer); possible bug
+            return buffer;
+        }
+        else {
+            // these cannot not exist
+            sprintf(buffer, "%s%s", gamePath, vPath);
+            return _strupr(buffer);
+        }
+
+        // should we overwrite the file?
+        std::string overridePath = toolBase + "mods\\" + &buffer[std::strlen(gamePath)];
+        if (GetFileAttributesA(overridePath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            LogFile::Format("vfs hook: redirected %s to %sX\n", buffer, overridePath.c_str());
+            std::strncpy(buffer, overridePath.c_str(), 260);
+            return _strupr(buffer);
+        }
+
+        if (GetFileAttributesA(buffer) == INVALID_FILE_ATTRIBUTES) {
+            char pathBuf[512]{};
+            sprintf(pathBuf, "Game requested non existent file at %s", buffer);
+            MessageBoxA(nullptr, pathBuf, "D3Hook", MB_ICONWARNING | MB_OK);
+        }
+
+        return _strupr(buffer);
+    }
+
+    static bool Install() {
+        //auto x = &SearchFile;
+        //mem::write<uint32_t>(0x6FA9A0, (uintptr_t)(void*&)x);
+
+#if 1
+		InstallCallback("PC Filesystem hook",
+			&SearchFile, {
+				cbHook<JMP>(0x5ABD70),
+			}
+		);
+#endif
 
         return true;
     }
+
+private:
+    uint8_t pad[6];
+    char gamePath[260]; /*TODO: or more*/
+    uint8_t pad1[424 - 266];
 };
+#pragma pack(pop) 
 
 intptr_t fnFrameworkRun;
 
@@ -1871,6 +1994,25 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return CallWindowProc(hProcOld, hWnd, uMsg, wParam, lParam);
 }
 
+static void DSLog_Imp(const char *str)
+{
+    bool createFile = *(bool*)0x007A2C18;
+
+	FILE* logHandle = nullptr;
+	_wfopen_s(&logHandle, makeToolPath(L"logs\\DSlog.txt").c_str(), createFile ? L"w" : L"a+");
+
+	if (!logHandle)
+		return;
+
+    if (createFile) {
+        fprintf(logHandle, "--<< DSound log file >>--\n\n");
+        *(bool*)0x007A2C18 = false;
+    }
+
+	fwrite(static_cast<const void*>(str), 1u, std::strlen(str), logHandle);
+	fclose(logHandle);
+}
+
 class HamsterViewport {
 protected:
     int         MultiSampleType;
@@ -1990,9 +2132,13 @@ protected:
         // put it just past the jump lookup table ;)
         mem::write<uint32_t>(0x5EC624, 0x5EC5CA);
 
-        // the jump table is at 0x5EC5F0, and our special case is at 0x5EC624
+        // the table is at 0x5EC5F0, and our special case is at 0x5EC624
         // therefore, we need an index of 13
         mem::write<uint8_t>(0x5EC600 + 33, 13);
+
+        // do not write dsound log in game Directory, as it might be read only
+        mem::write<uint8_t>(0x5CA800, 0xE9);
+        mem::write<uintptr_t>(0x5CA800 + 1, (intptr_t)&DSLog_Imp - 0x5CA800 - 5);
     }
 
     static void Install_V120() {
@@ -2079,6 +2225,7 @@ class HookSystemHandler
         InstallHandler<d3dStateManager>("d3dStateManager");
         InstallHandler<effectManagerHandler>("effectManager");
         InstallHandler<DrawListHandler>("DrawList");
+        InstallHandler<CFileSystemPC>("Filesystem");
 
         InstallHandler<HamsterViewportHandler>("HamsterViewport");
 

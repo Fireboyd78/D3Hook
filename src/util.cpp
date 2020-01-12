@@ -1,4 +1,8 @@
 #include "common.h"
+#include "dbghelp.h"
+
+#include <string>
+#include <algorithm>
 
 //
 // Debugging utilities
@@ -89,4 +93,147 @@ bool GetPathSpec(char *path, char *dest, int destLen) {
     }
 
     return false;
+}
+
+constexpr const wchar_t* REG_DIR = L"SOFTWARE\\Fireboyd78\\d3hook";
+
+class regStream
+{
+public:
+	inline explicit regStream(const wchar_t *subKey, HKEY masterKey = HKEY_CURRENT_USER){
+		RegOpenKeyExW(masterKey, subKey, 0, KEY_READ | KEY_WRITE, &key);
+	}
+
+	inline ~regStream() { close(); }
+	inline bool good() const { return key; }
+
+	inline void close() {
+		if (key) {
+			RegCloseKey(key);
+			key = nullptr;
+		}
+	}
+
+	inline void make(const wchar_t* subKey, HKEY masterKey = HKEY_CURRENT_USER) {
+		RegCreateKeyW(masterKey, subKey, &key);
+	}
+
+	inline bool read(const wchar_t* name, uint8_t* data, size_t size) {
+		if (key) {
+			DWORD type = REG_SZ;
+			DWORD rsize = static_cast<DWORD>(size);
+			return RegQueryValueExW(key, name, nullptr, &type, data, &rsize /*size in bytes*/);
+		}
+		return false;
+	}
+
+	inline bool write(const wchar_t* name, const uint8_t* data, size_t size) {
+		if (key) {
+			return RegSetValueExW(key, name, 0, REG_EXPAND_SZ, data, size /*size in bytes*/);
+		}
+		return false;
+	}
+
+	template<typename T>
+	inline bool read(const wchar_t *name, T& val) {
+		return read(name, reinterpret_cast<uint8_t*>(&val), sizeof(val));
+	}
+
+	template<typename T>
+	bool write(const wchar_t* name, const T& val) {
+		return write(name, reinterpret_cast<const uint8_t*>(&val), sizeof(val));
+	}
+
+	template<typename T>
+	inline bool write(const wchar_t* name, const std::basic_string<T> &str) {
+		return write(name, reinterpret_cast<const uint8_t*>(str.c_str()), str.size() * sizeof(T) /*wchar compat*/);
+	}
+
+	/*user must prepare string*/
+	template<typename T>
+	inline bool read(const wchar_t* name, std::basic_string<T>& str) {
+		return read(name, reinterpret_cast<uint8_t*>(str.data()), str.size() * sizeof(T));
+	}
+
+private:
+	HKEY key = nullptr;
+};
+
+std::wstring selectGamePath()
+{
+	wchar_t gameDir[MAX_PATH]{};
+
+	// user requests path change
+	bool reqReselect = GetAsyncKeyState(VK_SHIFT) & 0x8000;
+
+	regStream req(REG_DIR);
+	if (req.good() && !reqReselect)
+		req.read(L"gameBin", gameDir);
+	else {
+		req.make(REG_DIR);
+
+		OPENFILENAMEW file{};
+
+		wchar_t path[MAX_PATH] = { 0 };
+		file.lStructSize = sizeof(file);
+		file.nMaxFile = MAX_PATH;
+		file.lpstrFilter = L"Executables\0*.exe\0";
+		file.lpstrDefExt = L"EXE";
+		file.lpstrTitle = L"Please select your Driver executable (Driv3r.exe)";
+		file.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_ENABLESIZING | OFN_EXPLORER;
+
+		file.lpstrFile = path;
+		file.lpstrInitialDir = path;
+
+		auto hr = GetOpenFileNameW(&file);
+		if (!hr)
+		{
+			MessageBoxW(nullptr, L"Failed to retrieve the game path to the executable. Cannot launch D3Hook!", L"D3Hook", MB_OK);
+			TerminateProcess(GetCurrentProcess(), 0);
+		}
+
+		std::wstring str = path;
+		std::replace(str.begin(), str.end(), '\\', '/');
+
+		str = str.substr(0, str.find_last_of(L"/") + 1);
+
+		req.write(L"gameBin", str);
+		return str;
+	}
+
+	return gameDir;
+}
+
+std::wstring makeGamePath(const std::wstring& rel)
+{
+    static std::wstring gameRoot;
+    if (gameRoot.empty()) {
+		gameRoot = selectGamePath();
+    }
+
+	std::wstring newPath = gameRoot + rel;
+
+	// sanitize the path (this is a windows thing, on linux & osx we
+	// need to do it the other way around)
+	std::replace(newPath.begin(), newPath.end(), L'/', L'\\');
+
+	return newPath;
+}
+
+std::wstring makeToolPath(const std::wstring& rel_to)
+{
+	static wchar_t exePath[MAX_PATH]{};
+
+	if (!exePath[0]) {
+		wchar_t buf[MAX_PATH];
+		GetModuleFileNameW((HMODULE)nullptr, buf, MAX_PATH);
+		_wsplitpath(buf, &exePath[0], &exePath[_MAX_DRIVE - 1], nullptr, nullptr);
+	}
+
+	std::wstring newPath = exePath + rel_to;
+
+	// sanitize the path
+	std::replace(newPath.begin(), newPath.end(), L'/', L'\\');
+	
+	return newPath;
 }
