@@ -1655,18 +1655,17 @@ public:
 
     char* SearchFile(const char* vPath, char* buffer)
     {
+		static std::string toolBase;
+		if (toolBase.empty()) {
+			using convert_type = std::codecvt_utf8<wchar_t>;
+			std::wstring_convert<convert_type, wchar_t> converter;
+			toolBase = converter.to_bytes(makeToolPath(L""));
+		}
+
         auto* config = *(CSystemConfigBase**)0x8B8370;
 
         // our custom path redirection
-        if (!_strnicmp(vPath, "D3Hook:", 7))
-        {
-            static std::string toolBase;
-            if (toolBase.empty()) {
-                using convert_type = std::codecvt_utf8<wchar_t>;
-                std::wstring_convert<convert_type, wchar_t> converter;
-                toolBase = converter.to_bytes(makeToolPath(L""));
-            }
-
+        if (!_strnicmp(vPath, "D3Hook:", 7)) {
             std::sprintf(buffer, "%s%s", toolBase.c_str(), &vPath[7]);
         }
         else if (!_strnicmp(vPath, "TERR:", 5)) {
@@ -1682,7 +1681,6 @@ public:
             std::sprintf(buffer, "%sTERRITORY\\%s\\LOCALE\\%s\\%s", gamePath,
                 config->GetTerritoryString(),
                 config->GetAudioLanguageString(), &vPath[6]);
-            return _strupr(buffer);
         }
         else if (!_strnicmp(vPath, "LIVE:", 5)) {
             __debugbreak(); /*are there even any of these*/
@@ -1690,8 +1688,19 @@ public:
             //return _strupr(buffer); possible bug
             return buffer;
         }
-        else
+        else {
+            // these cannot not exist
             sprintf(buffer, "%s%s", gamePath, vPath);
+            return _strupr(buffer);
+        }
+
+        // should we overwrite the file?
+        std::string overridePath = toolBase + "mods\\" + &buffer[std::strlen(gamePath)];
+        if (GetFileAttributesA(overridePath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            LogFile::Format("vfs hook: redirected %s to %sX\n", buffer, overridePath.c_str());
+            std::strncpy(buffer, overridePath.c_str(), 260);
+            return _strupr(buffer);
+        }
 
         if (GetFileAttributesA(buffer) == INVALID_FILE_ATTRIBUTES) {
             char pathBuf[512]{};
@@ -1699,7 +1708,7 @@ public:
             MessageBoxA(nullptr, pathBuf, "D3Hook", MB_ICONWARNING | MB_OK);
         }
 
-		return _strupr(buffer);
+        return _strupr(buffer);
     }
 
     static bool Install() {
@@ -1883,7 +1892,7 @@ static void DSLog_Imp(const char *str)
     bool createFile = *(bool*)0x007A2C18;
 
 	FILE* logHandle = nullptr;
-	_wfopen_s(&logHandle, makeToolPath(L"\\DSlog.txt").c_str(), createFile ? L"w" : L"a+");
+	_wfopen_s(&logHandle, makeToolPath(L"logs\\DSlog.txt").c_str(), createFile ? L"w" : L"a+");
 
 	if (!logHandle)
 		return;

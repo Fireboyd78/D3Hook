@@ -16,7 +16,7 @@ namespace LogFile {
         }
 
         FILE* logFile = nullptr;
-        _wfopen_s(&logFile, makeToolPath(L"\\d3hook.log").c_str(), bCreateLog ? L"w" : L"a+");
+        _wfopen_s(&logFile, makeToolPath(L"logs\\d3hook.log").c_str(), bCreateLog ? L"w" : L"a+");
 
         if (logFile == nullptr)
         {

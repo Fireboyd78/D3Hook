@@ -120,9 +120,23 @@ static void invokeEntry(void(*ep)())
 	}
 }
 
+static void buildDirectoryStructure()
+{
+	auto create_if = [](const wchar_t* rDir)
+	{
+		auto total = makeToolPath(rDir);
+		if (GetFileAttributesW(total.c_str()) == INVALID_FILE_ATTRIBUTES)
+			CreateDirectoryW(total.c_str(), nullptr);
+	};
+
+	create_if(L"logs");
+	create_if(L"mods");
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
 	LogFile::WriteLine("Initializing D3Hook...");
+	buildDirectoryStructure();
 
 	auto gamePath = makeGamePath(L"");
 
