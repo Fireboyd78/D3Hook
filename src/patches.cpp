@@ -1600,13 +1600,13 @@ public:
         //--    }
         //--);
         //--
-        //--InstallCallback("renderer::SetSecondPassSamplerState",
-        //--    &SetSecondPassSamplerState, {
-        //--        cbHook<CALL>(0x5DF32D)
-        //--    }
-        //--);
+//--InstallCallback("renderer::SetSecondPassSamplerState",
+//--    &SetSecondPassSamplerState, {
+//--        cbHook<CALL>(0x5DF32D)
+//--    }
+//--);
 
-        return true;
+return true;
     }
 };
 
@@ -1645,7 +1645,7 @@ public:
 
 template<typename TRet, typename ...Args>
 inline TRet HACK_callthis(LPVOID lpFunc, Args ...args) {
-	return (*(TRet(__thiscall*)(Args...))lpFunc)(args...);
+    return (*(TRet(__thiscall*)(Args...))lpFunc)(args...);
 }
 
 
@@ -1655,52 +1655,50 @@ public:
 
     char* SearchFile(const char* vPath, char* buffer)
     {
-        auto *config = *(CSystemConfigBase**)0x8B8370;
+        auto* config = *(CSystemConfigBase**)0x8B8370;
 
         // our custom path redirection
         if (!_strnicmp(vPath, "D3Hook:", 7))
         {
             static std::string toolBase;
             if (toolBase.empty()) {
-				using convert_type = std::codecvt_utf8<wchar_t>;
-				std::wstring_convert<convert_type, wchar_t> converter;
+                using convert_type = std::codecvt_utf8<wchar_t>;
+                std::wstring_convert<convert_type, wchar_t> converter;
                 toolBase = converter.to_bytes(makeToolPath(L""));
             }
 
             std::sprintf(buffer, "%s%s", toolBase.c_str(), &vPath[7]);
-            return buffer;
         }
-
-        if (!_strnicmp(vPath, "TERR:", 5))
-        {
-            std::sprintf(buffer, "%sTERRITORY\\%s\\%s", gamePath, 
+        else if (!_strnicmp(vPath, "TERR:", 5)) {
+            std::sprintf(buffer, "%sTERRITORY\\%s\\%s", gamePath,
                 config->GetTerritoryString(), &vPath[5]);
-			return _strupr(buffer);
-		}
-
-        if (!_strnicmp(vPath, "LANG:", 5))
-        {
-			std::sprintf(buffer, "%sTERRITORY\\%s\\LOCALE\\%s\\%s", gamePath, 
+        }
+        else if (!_strnicmp(vPath, "LANG:", 5)) {
+            std::sprintf(buffer, "%sTERRITORY\\%s\\LOCALE\\%s\\%s", gamePath,
                 config->GetTerritoryString(),
                 config->GetTextLanguageString(), &vPath[5]);
-			return _strupr(buffer);
         }
-
-		if (!_strnicmp(vPath, "AUDIO:", 6))
-		{
-			std::sprintf(buffer, "%sTERRITORY\\%s\\LOCALE\\%s\\%s", gamePath,
-				config->GetTerritoryString(),
-				config->GetTextLanguageString(), &vPath[6]);
-			return _strupr(buffer);
-		}
-
-        if (!_strnicmp(vPath, "LIVE:", 5)) {
+        else if (!_strnicmp(vPath, "AUDIO:", 6)) {
+            std::sprintf(buffer, "%sTERRITORY\\%s\\LOCALE\\%s\\%s", gamePath,
+                config->GetTerritoryString(),
+                config->GetAudioLanguageString(), &vPath[6]);
+            return _strupr(buffer);
+        }
+        else if (!_strnicmp(vPath, "LIVE:", 5)) {
+            __debugbreak(); /*are there even any of these*/
             std::strncpy(buffer, vPath, 260);
             //return _strupr(buffer); possible bug
             return buffer;
         }
+        else
+            sprintf(buffer, "%s%s", gamePath, vPath);
 
-		sprintf(buffer, "%s%s", gamePath, vPath);
+        if (GetFileAttributesA(buffer) == INVALID_FILE_ATTRIBUTES) {
+            char pathBuf[512]{};
+            sprintf(pathBuf, "Game requested non existent file at %s", buffer);
+            MessageBoxA(nullptr, pathBuf, "D3Hook", MB_ICONWARNING | MB_OK);
+        }
+
 		return _strupr(buffer);
     }
 
