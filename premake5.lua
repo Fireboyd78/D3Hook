@@ -32,10 +32,10 @@ workspace "D3Mods"
         flags { "NoIncrementalLink" }
         linkoptions "/IGNORE:4254 /DYNAMICBASE:NO /LARGEADDRESSAWARE /LAST:.zdata"
         
-        includedirs { 'src' }
-        libdirs { 'src/dxsdk' }
+        includedirs { 'src', 'src/imgui' }
+        libdirs { 'src/dxsdk', 'src/imgui' }
         
-        links { "d3dx9", "d3d9" }
+        links { "d3dx9", "d3d9", "xinput" }
         
         files 
         {

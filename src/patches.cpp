@@ -1,5 +1,15 @@
 
 #include "main.h"
+
+//#define USE_GUI
+//#define DRAW_GUI 0
+
+#include "imgui.h"
+
+#ifdef USE_GUI
+#include "hook_gui.h"
+#endif
+
 #include <shellapi.h>
 
 IDirect3D9* pD3D;
@@ -23,6 +33,31 @@ static int gameversion = 0;
 
 static fxModule gamemodule;
 static fxModule mymodule;
+
+#ifdef USE_GUI
+static bool g_bGUIWaiting = false;
+
+static bool g_bGUIReady = false;
+static bool g_bGUIFocus = false;
+
+static void DrawGUI() {
+#if DRAW_GUI
+    if (g_bGUIWaiting) {
+        LogFile::WriteLine("Initializing ImGui...");
+        gui::Initialize(hamster::GetMainWindow(), pD3DDevice);
+        g_bGUIReady = true;
+        g_bGUIWaiting = false;
+    }
+
+    if (g_bGUIReady) {
+        gui::BeginFrame();
+        gui::Update();
+        gui::Render();
+        gui::EndFrame();
+    }
+#endif
+}
+#endif
 
 static void InitGameModule(HINSTANCE hInstance) {
     if (!fxModule::Initialize(gamemodule, hInstance))
@@ -167,6 +202,13 @@ bool HandleKeyPress(DWORD vKey)
     HandlePanicButton(vKey);
 
     switch (vKey) {
+#ifdef USE_GUI
+    case VK_F3:
+    {
+        g_bGUIFocus = !g_bGUIFocus;
+        return true;
+    }
+#endif
     case VK_F5:
     {
         LOG("Testing the file chunker hook...");
@@ -1552,6 +1594,27 @@ public:
         return fiero::as<d3dStateManager>::func<int, int, int>(0x5DFE50)(pD3DStateManager, type, state);
     }
 
+#ifdef USE_GUI
+    HRESULT Present(long hwndOverride) {
+        auto result = fiero::as<renderer>::func<HRESULT, long>(0x5DA840)(this, hwndOverride);
+#if DRAW_GUI
+        if (result == D3DERR_DEVICELOST) {
+            if (pD3DDevice->TestCooperativeLevel() == D3DERR_DEVICENOTRESET)
+                gui::Reset();
+        }
+#endif
+        return result;
+    }
+
+    void Draw() {
+        // let the game go first
+        fiero::as<renderer>::func<void>(0x5DA660)(this);
+
+        // now we draw our gui :)
+        DrawGUI();
+    }
+#endif
+
     static bool Install() {
         if (gameversion != __DRIV3R_V100) {
             HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS();
@@ -1581,7 +1644,19 @@ public:
                 cbHook<CALL>(0x5DF2EF),
             }
         );
+#ifdef USE_GUI
+        InstallCallback("renderer::present",
+            &Present, {
+                cbHook<CALL>(0x5B4132),
+            }
+        );
 
+        InstallCallback("renderer::draw",
+            &Draw, {
+                cbHook<CALL>(0x5B4197),
+            }
+        );
+#endif
         /*
             implement patch 2 behavior;
             call the d3dStateManager directly, bypassing the 'type < 41' check
@@ -1616,15 +1691,22 @@ class FrameworkHandler : public IFramework {
 public:
     void Run() {
         bool subclassWindow = true;
+        bool canUseGui = false;
+
+        auto hwnd = hamster::GetMainWindow();
 
         if (subclassWindow)
         {
             LogFile::Write("Subclassing window...");
 
-            if (SubclassGameWindow(hamster::GetMainWindow(), WndProcNew, &hProcOld))
+            if (SubclassGameWindow(hwnd, WndProcNew, &hProcOld))
+            {
                 LogFile::Write("Done!\n");
-            else
+                canUseGui = true;
+            }
+            else {
                 LogFile::Write("FAIL!\n");
+            }
         }
 
         //pD3D = hamster::GetD3D();
@@ -1640,6 +1722,7 @@ public:
         else
         {
             LOG("Could not retrieve the D3D device pointer!");
+            canUseGui = false;
         }
 
         pUserCmdProxy = hamster::UserCommandProxy::Get();
@@ -1655,6 +1738,12 @@ public:
         {
             LOG("Could not retrieve the user command proxy!");
         }
+
+#ifdef USE_GUI
+        // if we subclassed the window and got the device
+        if (canUseGui)
+            g_bGUIWaiting = true;
+#endif
 
         LogFile::AppendLine();
 
@@ -1681,9 +1770,7 @@ public:
         }
         */
 
-        auto framework = hamster::Framework::Get();
-
-        reinterpret_cast<MemberCall<void, IFramework>&>(fnFrameworkRun)(framework);
+        reinterpret_cast<MemberCall<void, IFramework> &>(fnFrameworkRun)(this);
     };
 
     static bool Install()
@@ -1746,19 +1833,39 @@ static BOOL WindowUpdated(HWND hWnd) {
 
 LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+#ifdef USE_GUI
+    if (g_bGUIReady
+        && g_bGUIFocus
+        && gui::runtime::WndProcHandler(hWnd, uMsg, wParam, lParam))
+        return true;
+#endif
     switch (uMsg) {
     case WM_DESTROY:
-    {
-        /*
-            Free anything up as needed
-        */
-    } break;
-
+#ifdef USE_GUI
+        if (g_bGUIReady) {
+            gui::Shutdown();
+            g_bGUIReady = false;
+        }
+#endif
+        break;
+#ifdef USE_GUI
+    case WM_SIZE:
+        if (g_bGUIReady)
+            gui::Reset();
+        break;
+    
+    case WM_SYSCOMMAND:
+        if (g_bGUIReady && g_bGUIFocus)
+        {
+            if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
+                return 0;
+        }
+        break;
+#endif
     case WM_KEYUP:
-    {
         if (HandleKeyPress((DWORD)wParam))
             return 0;
-    } break;
+        break;
     }
 
     return CallWindowProc(hProcOld, hWnd, uMsg, wParam, lParam);
@@ -2034,3 +2141,100 @@ void Initialize(RSDSEntry& gameInfo) {
 
     HookSystemHandler::Install();
 }
+
+#ifdef USE_GUI
+//
+// gui user-functions
+//
+
+static char g_MegaBuffer[4096 * 4096 * 64] = { NULL };
+static size_t g_MegaBufferOffset = 0;
+
+void *HungryAllocate(size_t size, void *user_data) {
+    if (g_MegaBufferOffset >= sizeof(g_MegaBuffer))
+        return nullptr;
+
+    void *buffer = (void *)g_MegaBuffer[g_MegaBufferOffset];
+    g_MegaBufferOffset += size;
+
+    ZeroMemory(buffer, size);
+
+    return buffer;
+}
+
+void HungryFree(void *ptr, void *user_data) {
+    // LOL
+}
+
+void gui::Initialize(HWND hwnd, IDirect3DDevice9 *device)
+{
+    // Setup Dear ImGui context
+    IMGUI_CHECKVERSION();
+
+    ImGui::SetAllocatorFunctions(HungryAllocate, HungryFree);
+
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+
+    // Setup Dear ImGui style
+    ImGui::StyleColorsDark();
+    //ImGui::StyleColorsClassic();
+
+    // Setup Platform/Renderer bindings
+    gui::runtime::Initialize(hwnd);
+    gui::device::Initialize(device);
+}
+
+void gui::Shutdown()
+{
+    gui::device::Shutdown();
+    gui::runtime::Shutdown();
+
+    ImGui::DestroyContext();
+}
+
+void gui::Update()
+{
+    // Our state
+    static bool show_demo_window = true;
+    static bool show_another_window = false;
+
+    // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
+    if (show_demo_window)
+        ImGui::ShowDemoWindow(&show_demo_window);
+
+    // 2. Show a simple window that we create ourselves. We use a Begin/End pair to created a named window.
+    {
+        static float f = 0.0f;
+        static int counter = 0;
+
+        ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
+
+        ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
+        ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
+        ImGui::Checkbox("Another Window", &show_another_window);
+
+        ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
+
+        if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
+            counter++;
+        ImGui::SameLine();
+        ImGui::Text("counter = %d", counter);
+
+        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+        ImGui::End();
+    }
+
+    // 3. Show another simple window.
+    if (show_another_window)
+    {
+        ImGui::Begin("Another Window", &show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
+        ImGui::Text("Hello from another window!");
+        if (ImGui::Button("Close Me"))
+            show_another_window = false;
+        ImGui::End();
+    }
+}
+#endif
