@@ -1,4 +1,5 @@
 #include "IDirect3DDevice9Hook.h"
+#include <algorithm>
 
 /*** IUnknown methods ***/
 STDCALL(IDirect3DDevice9Hook::QueryInterface)(THIS_ REFIID riid, void** ppvObj){
@@ -28,6 +29,9 @@ STDCALL(IDirect3DDevice9Hook::EvictManagedResources)(THIS){
 }
 
 STDCALL(IDirect3DDevice9Hook::GetDirect3D)(THIS_ IDirect3D9** ppD3D9){
+    if (!pD3D) {
+        return DEVICE->GetDirect3D(ppD3D9);
+    }
     *ppD3D9 = pD3D;
     return D3D_OK;
 }
@@ -298,6 +302,70 @@ STDCALL(IDirect3DDevice9Hook::GetSamplerState)(THIS_ DWORD Sampler, D3DSAMPLERST
 }
 
 STDCALL(IDirect3DDevice9Hook::SetSamplerState)(THIS_ DWORD Sampler, D3DSAMPLERSTATETYPE Type, DWORD Value){
+    const int anisotropicFiltering = 1; // TODO: config...
+
+    static bool anisotropyDetectNeeded = true;
+    static int nMaxAnisotropy = 16;
+
+    // Disable AntiAliasing when using point filtering
+    //if (Config.AntiAliasing)
+    {
+        if (Type == D3DSAMP_MINFILTER || Type == D3DSAMP_MAGFILTER)
+        {
+            if (Value == D3DTEXF_NONE || Value == D3DTEXF_POINT)
+            {
+                DEVICE->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, FALSE);
+            }
+            else
+            {
+                DEVICE->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
+            }
+        }
+    }
+
+    // detect max anisotropy
+    if (anisotropyDetectNeeded && (Type == D3DSAMP_MAXANISOTROPY || ((Type == D3DSAMP_MINFILTER || Type == D3DSAMP_MAGFILTER) && Value == D3DTEXF_LINEAR)))
+    {
+        anisotropyDetectNeeded = false;
+
+        D3DCAPS9 Caps;
+        ZeroMemory(&Caps, sizeof(D3DCAPS9));
+        if (SUCCEEDED(DEVICE->GetDeviceCaps(&Caps)))
+        {
+            nMaxAnisotropy = (anisotropicFiltering == 1) ? Caps.MaxAnisotropy : std::min((DWORD)anisotropicFiltering, Caps.MaxAnisotropy);
+        }
+
+        if (nMaxAnisotropy && SUCCEEDED(DEVICE->SetSamplerState(Sampler, D3DSAMP_MAXANISOTROPY, nMaxAnisotropy)))
+        {
+            LogFile::Format("Setting Anisotropy Filtering at %dx\n", nMaxAnisotropy);
+        }
+        else
+        {
+            nMaxAnisotropy = 0;
+            LogFile::WriteLine("Failed to enable Anisotropy Filtering!");
+        }
+    }
+
+    // enable anisotropic filtering
+    if (nMaxAnisotropy)
+    {
+        if (Type == D3DSAMP_MAXANISOTROPY)
+        {
+            if (SUCCEEDED(DEVICE->SetSamplerState(Sampler, D3DSAMP_MAXANISOTROPY, nMaxAnisotropy)))
+            {
+                return D3D_OK;
+            }
+        }
+        else if ((Type == D3DSAMP_MINFILTER || Type == D3DSAMP_MAGFILTER) && Value == D3DTEXF_LINEAR)
+        {
+            if (SUCCEEDED(DEVICE->SetSamplerState(Sampler, D3DSAMP_MAXANISOTROPY, nMaxAnisotropy)) &&
+                SUCCEEDED(DEVICE->SetSamplerState(Sampler, Type, D3DTEXF_ANISOTROPIC)))
+            {
+                return D3D_OK;
+            }
+        }
+    }
+
     return DEVICE->SetSamplerState(Sampler, Type, Value);
 }
 

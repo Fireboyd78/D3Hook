@@ -541,16 +541,18 @@ protected:
 
     int InitShaderFX()
     {
+        bool loadedFromChunk = false;
+
         if (gameversion == __DRIV3R_V100)
         {
             /* Loads shaders from AllShaders.chunk */
             CFileChunker shadersChunk = CFileChunker();
 
-            int errorCode = 0;
-
             LogFile::WriteLine("Loading shaders chunk...");
             if (shadersChunk.OpenChunks("D3Hook:shaders\\AllShaders.chunk"))
             {
+                int errorCode = 0;
+
                 int nShaders = shadersChunk.GetChunkCount();
 
                 LogFile::Format(" - Count: %d\n", nShaders);
@@ -585,18 +587,20 @@ protected:
                 }
 
                 shadersChunk.Release();
+
+                // something went wrong, abort
+                if (errorCode != 0)
+                    return errorCode;
+
+                loadedFromChunk = true;
             }
             else
             {
-                MessageBoxW(hamster::GetMainWindow(), L"FATAL ERROR: Cannot open the shaders file!", L"D3Hook", MB_OK | MB_ICONERROR);
-                return E_FAIL;
+                LogFile::WriteLine("ERROR: Cannot open the shaders file located at 'D3Hook:shaders\\AllShaders.chunk'");
             }
-
-            // something went wrong, abort
-            if (errorCode != 0)
-                return errorCode;
         }
-        else
+
+        if(!loadedFromChunk)
         {
             for (auto shader : shader_programs) {
                 /* Loads shader from EXE */
@@ -1343,7 +1347,9 @@ public:
             });
 
         // quick and dirty way to try fixing mipmaps
-        manager->globalstate.addSamplerState({ D3DSAMP_MIPMAPLODBIAS, -1.0f });
+        manager->globalstate.addSamplerState({ D3DSAMP_MIPMAPLODBIAS, -1.25f });
+        manager->globalstate.addSamplerState({ D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC });
+        manager->globalstate.addSamplerState({ D3DSAMP_MAGFILTER, D3DTEXF_ANISOTROPIC });
     }
 
     void registerStateParams(void) {
@@ -1743,6 +1749,11 @@ public:
         if (!_strnicmp(vPath, "D3Hook:", 7)) {
             std::sprintf(buffer, "%s%s", toolBase.c_str(), &vPath[7]);
         }
+        else if (!_strnicmp(vPath, "LANG:TERR:", 10)) { // totally strange case but we have to handle it
+            std::sprintf(buffer, "%sTERRITORY\\%s\\LOCALE\\%s\\%s", gamePath,
+                config->GetTerritoryString(),
+                config->GetTextLanguageString(), &vPath[10]);
+        }
         else if (!_strnicmp(vPath, "TERR:", 5)) {
             std::sprintf(buffer, "%sTERRITORY\\%s\\%s", gamePath,
                 config->GetTerritoryString(), &vPath[5]);
@@ -1778,9 +1789,8 @@ public:
         }
 
         if (GetFileAttributesA(buffer) == INVALID_FILE_ATTRIBUTES) {
-            char pathBuf[512]{};
-            sprintf(pathBuf, "Game requested non existent file at %s", buffer);
-            MessageBoxA(nullptr, pathBuf, "D3Hook", MB_ICONWARNING | MB_OK);
+            LogFile::Format("WARNING: Game requested non existent file at %s", buffer);
+            LogFile::AppendLine();
         }
 
         return _strupr(buffer);
