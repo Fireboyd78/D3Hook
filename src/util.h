@@ -5,6 +5,10 @@
 //
 
 #define EXPAND( x ) x
+#define STRFY(x) #x
+
+#define ASSERT_SIZEOF(t,s)      static_assert(sizeof(t) <= s, "Size mismatch for type '" STRFY(t) "'; too big (expected " STRFY(s) ")"); \
+                                static_assert(sizeof(t) == s, "Size mismatch for type '" STRFY(t) "'; too small (expected " STRFY(s) ")")
 
 // <3 Python
 #define PASS {}
@@ -27,6 +31,9 @@
 
 // short-hand for NOINLINE
 #define NO_INL                  NOINLINE
+
+#define DONOTCALL               = delete
+#define FORWARD_THUNK           {}
 
 // hooked __thiscall functions require a 'this' pointer parameter
 #define _THIS                   void *This

@@ -201,6 +201,17 @@ void InstallCallback(LPCSTR description, auto_ptr hook, cbInfo info, intptr_t *c
     InstallCallback(hook, info, cb);
 }
 
+void InstallCallback(LPCSTR name, LPCSTR description, auto_ptr hook, cbInfo info, intptr_t *cb)
+{
+    LogFile::Format(" - Installing callback [%08X] for '%s':\n", hook, name);
+
+    if (description != nullptr)
+        LogFile::Format(" - Description: %s\n", description);
+
+    LogFile::Format("   => [%s] %08X\n", hook_types[info.type], info.addr);
+    InstallCallback(hook, info, cb);
+}
+
 void InstallCallback(LPCSTR name, LPCSTR description, auto_ptr hook, std::initializer_list<cbInfo> callbacks)
 {
     LogFile::Format(" - Installing callback [%08X] for '%s':\n", hook, name);

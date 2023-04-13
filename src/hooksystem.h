@@ -4,6 +4,7 @@
 #include "hook.h"
 
 #define ADDRESS_PLACEHOLDER 0xDEADBEEF
+#define BADADDR ADDRESS_PLACEHOLDER
 
 enum hookType : unsigned int
 {
@@ -131,6 +132,8 @@ void InstallPatch(LPCSTR description, std::initializer_list<uint8_t> bytes, std:
 
 void InstallCallback(auto_ptr hook, cbInfo info, intptr_t *cb);
 void InstallCallback(LPCSTR description, auto_ptr hook, cbInfo info, intptr_t *cb);
+void InstallCallback(LPCSTR name, LPCSTR description, auto_ptr hook, cbInfo info, intptr_t *cb);
+
 void InstallCallback(LPCSTR name, LPCSTR description, auto_ptr hook, std::initializer_list<cbInfo> callbacks);
 
 void InstallVTableHook(LPCSTR name, auto_ptr hook, std::initializer_list<intptr_t> addresses);

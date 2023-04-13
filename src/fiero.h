@@ -5,6 +5,7 @@
 #include <string>
 #include <codecvt>
 
+#include <new>
 #include <type_traits>
 
 #include "util.h"
@@ -159,91 +160,51 @@ namespace fiero
     }
 
     template <typename TType,
+        bool is_arithmetic = std::is_arithmetic<TType>::value,
         bool is_pointer = std::is_pointer<TType>::value,
-        bool is_array   = std::is_array<TType>::value>
-    class Type {};
+        bool is_array = std::is_array<TType>::value>
+        class Type {};
 
     /*
-        Hook template for value types
+    Hook template for unspecialized types
     */
     template <typename TType>
-    class Type<TType, false, false> {
+    class Type<TType, false, false, false> {
     protected:
         TType *lpValue;
     public:
-        constexpr Type(intptr_t address)
-            : lpValue(reinterpret_cast<TType *>(address)) {};
-        
+        constexpr Type(intptr_t address) : lpValue(reinterpret_cast<TType *>(address)) {};
+
         inline TType & get() const                          { return *lpValue; }
         inline void set(TType value)                        { *lpValue = value; }
 
         inline TType * ptr() const                          { return lpValue; }
 
         /*
-            Operators
+        Operators
         */
 
         inline TType * operator->() const                   { return lpValue; };
         inline TType * operator&() const                    { return lpValue; };
         inline TType & operator*() const                    { return *lpValue; };
-        inline TType * operator[](int index) const          { return &lpValue[index]; }
         inline TType & operator=(TType value)               { return (*lpValue = value); }
 
-        inline operator TType &() const                     { return *lpValue; }
-
-        /*
-            Comparison operators
-        */
-
-        inline bool operator==(const TType &rhs) const      { return *lpValue == rhs; }
-        inline bool operator!=(const TType &rhs) const      { return *lpValue != rhs; }
-
-        /*
-            Value-type operators
-        */
-
-        inline bool operator<(const TType &rhs) const       { return *lpValue < rhs; }
-        inline bool operator>(const TType &rhs) const       { return *lpValue > rhs; }
-        inline bool operator<=(const TType &rhs) const      { return *lpValue <= rhs; }
-        inline bool operator>=(const TType &rhs) const      { return *lpValue >= rhs; }
-        
-        inline TType operator+() const                      { return +(*lpValue); }
-        inline TType operator-() const                      { return -(*lpValue); }
-        inline TType operator~() const                      { return ~(*lpValue); }
-        
-        inline TType operator+(const TType &rhs) const      { return *lpValue + rhs; }
-        inline TType operator-(const TType &rhs) const      { return *lpValue - rhs; }
-        inline TType operator*(const TType &rhs) const      { return *lpValue * rhs; }
-        inline TType operator/(const TType &rhs) const      { return *lpValue / rhs; }
-        inline TType operator%(const TType &rhs) const      { return *lpValue % rhs; }
-        inline TType operator&(const TType &rhs) const      { return *lpValue & rhs; }
-        inline TType operator|(const TType &rhs) const      { return *lpValue | rhs; }
-        inline TType operator^(const TType &rhs) const      { return *lpValue ^ rhs; }
-        inline TType operator<<(const TType &rhs) const     { return *lpValue << rhs; }
-        inline TType operator>>(const TType &rhs) const     { return *lpValue >> rhs; }
-        
-        inline TType operator+=(const TType &rhs)           { return (*lpValue += rhs); }
-        inline TType operator-=(const TType &rhs)           { return (*lpValue -= rhs); }
-        inline TType operator*=(const TType &rhs)           { return (*lpValue *= rhs); }
-        inline TType operator/=(const TType &rhs)           { return (*lpValue /= rhs); }
-        inline TType operator%=(const TType &rhs)           { return (*lpValue %= rhs); }
-        inline TType operator&=(const TType &rhs)           { return (*lpValue &= rhs); }
-        inline TType operator|=(const TType &rhs)           { return (*lpValue |= rhs); }
-        inline TType operator^=(const TType &rhs)           { return (*lpValue ^= rhs); }
-        inline TType operator<<=(const TType &rhs)          { return (*lpValue <<= rhs); }
-        inline TType operator>>=(const TType &rhs)          { return (*lpValue >>= rhs); }
+        inline Type<TType> & operator=(const Type<TType> &other)
+        {
+            *lpValue = *other.lpValue;
+            return *this;
+        }
     };
 
     /*
-        Hook template for pointer types
+    Hook template for arithmetic types
     */
     template <typename TType>
-    class Type<TType, true, false> {
+    class Type<TType, true, false, false> {
     protected:
         TType *lpValue;
     public:
-        constexpr Type(intptr_t address)
-            : lpValue(reinterpret_cast<TType *>(address)) {};
+        constexpr Type(intptr_t address) : lpValue(reinterpret_cast<TType *>(address)) {};
 
         inline TType & get() const                          { return *lpValue; }
         inline void set(TType value)                        { *lpValue = value; }
@@ -251,88 +212,184 @@ namespace fiero
         inline TType * ptr() const                          { return lpValue; }
 
         /*
-            Operators
+        Operators
         */
 
-        inline TType & operator->() const                   { return *lpValue; };
         inline TType * operator&() const                    { return lpValue; };
         inline TType & operator*() const                    { return *lpValue; };
-        inline TType operator[](int index) const            { return lpValue[index]; }
         inline TType & operator=(TType value)               { return (*lpValue = value); }
 
         inline operator TType &() const                     { return *lpValue; }
 
+        template <typename T>
+        inline operator T *() const                        { return reinterpret_cast<T *>(*lpValue); }
+
+        inline Type<TType> & operator=(const Type<TType> &other)
+        {
+            *lpValue = *other.lpValue;
+            return *this;
+        }
+    };
+
+    /*
+    Hook template for pointer types
+    */
+    template <typename TType>
+    class Type<TType, false, true, false> {
+    protected:
+        TType *lpValue;
+    public:
+        constexpr Type(intptr_t address) : lpValue(reinterpret_cast<TType *>(address)) {};
+
+        inline TType & get() const                          { return *lpValue; }
+        inline void set(TType value)                        { *lpValue = value; }
+
+        inline TType * ptr() const                          { return lpValue; }
+
         /*
-            Comparison operators
+        Operators
+        */
+
+        inline auto & operator->() const                      { return *lpValue; };
+        inline auto & operator&() const                       { return *lpValue; }
+        inline auto & operator*() const                       { return *lpValue; };
+        inline auto & operator[](int index) const             { return (*lpValue)[index]; }
+
+        inline TType & operator=(TType value)               { return (*lpValue = value); }
+
+        inline operator TType() const                        { return *lpValue; }
+
+        /*
+        Comparison operators
         */
 
         inline bool operator==(const TType &rhs) const      { return *lpValue == rhs; }
         inline bool operator!=(const TType &rhs) const      { return *lpValue != rhs; }
-        
+
         inline bool operator==(const std::nullptr_t &rhs) const
-                                                            { return *lpValue == nullptr; }
+        { return *lpValue == nullptr; }
         inline bool operator!=(const std::nullptr_t &rhs) const
-                                                            { return *lpValue != nullptr; }
+        { return *lpValue != nullptr; }
 
         template <typename... TArgs>
         inline auto operator()(TArgs... args) {
             return (*lpValue)(args...);
         }
+
+        inline Type<TType> & operator=(const Type<TType> &other)
+        {
+            *lpValue = *other.lpValue;
+            return *this;
+        }
     };
 
     /*
-        Hook template for array types
+    Hook template for array types
     */
     template <typename TArray>
-    class Type<TArray, false, true> {
-        /*
-            we need all this spaghett to resolve the actual array type
-            because the fucking template isn't smart enough to do so
-        */
+    class Type<TArray, false, false, true> {
+        template <typename _T, unsigned = 0>
+        static constexpr _T * _type(_T(*)[]);
 
-        template <typename _T, int N>
-        using array_type = _T(*)[N];
+        template <typename _T, unsigned N0>
+        static constexpr _T * _type(_T(*)[N0]);
 
-        template <typename _T, int N>
-        static constexpr _T _type(array_type<_T, N>);
+        template <typename _T, unsigned N0, unsigned N1>
+        static constexpr decltype(_T[N1]) * _type(_T(*)[N0][N1]);
 
-        template <typename _T, int N>
-        static constexpr int _count(array_type<_T, N>) {
-            return N;
-        };
+        template <typename _T, unsigned N0, unsigned N1, unsigned N2>
+        static constexpr decltype(_T[N1][N2]) * _type(_T(*)[N0][N1][N2]);
+
+        template <typename _T, unsigned N0, unsigned N1, unsigned N2, unsigned N3>
+        static constexpr decltype(_T[N1][N2][N3]) * _type(_T(*)[N0][N1][N2][N3]);
+
+# if 0
+        template <typename _T, unsigned = 0>
+        static constexpr size_t _sum(_T(*)[]) { return 0 };
+
+        template <typename _T, unsigned N0>
+        static constexpr size_t _sum(_T(*)[N0]) { return N0 };
+
+        template <typename _T, unsigned N0, unsigned N1>
+        static constexpr size_t _sum(_T(*)[N0][N1]) { return variadic::sum<N0, N1>; }
+
+        template <typename _T, unsigned N0, unsigned N1, unsigned N2>
+        static constexpr size_t _sum(_T(*)[N0][N1][N2]) { return variadic::sum<N0, N1, N2>; }
+
+        template <typename _T, unsigned N0, unsigned N1, unsigned N2, unsigned N3>
+        static constexpr size_t _sum(_T(*)[N0][N1][N2][N3]) { return variadic::sum<N0, N1, N2, N3>; }
+
+
+        template <typename _T, unsigned N0 = 0>
+        static constexpr size_t _dim(_T(*)[]) { return 0; };
+
+        template <typename _T, unsigned N0>
+        static constexpr size_t _dim(_T(*)[N0]) { return variadic::dim<N0>; };
+
+        template <typename _T, unsigned N0, unsigned N1>
+        static constexpr size_t _dim(_T(*)[N0][N1]) { return variadic::dim<N0, N1>; }
+
+        template <typename _T, unsigned N0, unsigned N1, unsigned N2>
+        static constexpr size_t _dim(_T(*)[N0][N1][N2]) { return variadic::dim<N0, N1, N2>; }
+
+        template <typename _T, unsigned N0, unsigned N1, unsigned N2, unsigned N3>
+        static constexpr size_t _dim(_T(*)[N0][N1][N2][N3]) { return variadic::dim<N0, N1, N2, N3>; }
+# endif
 
         using type = decltype(_type((TArray *)nullptr));
 
         template <typename TRet, typename ...TArgs>
         using rtype = TRet;
     protected:
-        using TValue = rtype<type>;
+        using TType = std::remove_pointer< rtype<type> >::template type;
 
-        TValue *lpValue;
+        TArray *lpValue;
     public:
-        constexpr Type(intptr_t address)
-            : lpValue(reinterpret_cast<TValue *>(address)) {};
+        constexpr Type(intptr_t address) : lpValue(reinterpret_cast<TArray *>(address)) {};
 
-        inline int count() const {
-            return _count((TArray *)nullptr);
+        inline size_t size() const {
+            return sizeof(*(TType*)nullptr);
         }
 
-        inline size_t length() {
-            return count() * sizeof(TValue);
-        }
+        inline auto ptr() const                             { return lpValue; }
 
-        inline TValue * ptr() const                         { return lpValue; }
-        inline TValue * ptr(int index) const                { return lpValue + index; }
+        inline void set(TArray *other)                      { memcpy(lpValue, other, size()); }
 
         /*
-            Operators
+        Operators
         */
 
-        inline TValue * operator&() const                   { return lpValue; };
-        inline TValue & operator[](int index) const         { return lpValue[index]; }
+        inline auto & operator&() const                     { return lpValue; };
+        inline auto & operator*() const                     { return *lpValue; }
+        inline auto & operator[](int index) const           { return (*lpValue)[index]; }
 
-        template <typename TType>
         inline operator TType *() const                     { return reinterpret_cast<TType *>(lpValue); }
+
+        inline Type<TArray> & operator=(const Type<TArray> &other) = delete;
+    };
+
+    template <typename TType>
+    class TypeProxy {
+    protected:
+        TType *lpValue;
+    public:
+        static_assert(!std::is_pointer<TType>::value, "Type proxy cannot be a pointer to a class.");
+        static_assert(!std::is_array<TType>::value, "Type proxy cannot be an array.");
+
+        constexpr TypeProxy(intptr_t address) : lpValue(reinterpret_cast<TType *>(address)) {};
+
+        inline void read(TType &value)              { memcpy(&value, lpValue, sizeof(TType)); }
+        inline void write(TType &value)             { memcpy(lpValue, &value, sizeof(TType)); }
+
+        inline TType* operator->() const            { return lpValue; }
+        inline TType* operator&() const             { return lpValue; }
+        inline TType& operator*() const             { return *lpValue; }
+        inline TType& operator[](int index) const   { return &lpValue[index]; }
+
+        inline operator TType*() const              { return lpValue; }
+        inline operator TType&() const              { return *lpValue; }
+
+        inline TypeProxy<TType> & operator=(const TypeProxy<TType> &other) = delete;
     };
 
     template <typename TType>
@@ -392,7 +449,7 @@ namespace fiero
         };
     public:
         template<typename TRet, class TThis, typename ...TArgs>
-        static INLINE_CONSTEXPR TRet Call(const TThis &&This, TArgs ...args) {
+        static INLINE_CONSTEXPR TRet Call(const TThis *This, TArgs ...args) {
             return reinterpret_cast<MemberCall<TRet, TThis, TArgs...>>(_Address)(This, args...);
         };
 
@@ -449,7 +506,7 @@ namespace fiero
             constexpr ThisCall(int address) : Func<TRet>(address) {};
 
             template<typename ...TArgs, class TThis>
-            INLINE_CONSTEXPR TRet operator()(const TThis &&This, TArgs ...args) const {
+            INLINE_CONSTEXPR TRet operator()(const TThis *This, TArgs ...args) const {
                 return static_cast<MemberCall<TRet, TThis, TArgs...>>(lpFunc)(This, args...);
             };
 
@@ -521,12 +578,77 @@ namespace fiero
     public:
         constexpr Func(int address) : Func<TRet>(address) {};
 
-        INLINE_CONSTEXPR TRet operator()(const TThis &&This, TArgs ...args) const {
-            return static_cast<MemberCall>(lpFunc)(args...);
+        template <class TClass>
+        INLINE_CONSTEXPR TRet operator()(const TClass *This, TArgs ...args) const {
+            return static_cast<MemberCall<TRet, TClass, TArgs...>>(lpFunc)(This, args...);
+        };
+
+        INLINE_CONSTEXPR TRet operator()(const TThis *This, TArgs ...args) const {
+            return static_cast<MemberCall>(lpFunc)(This, args...);
         };
 
         INLINE_CONSTEXPR operator MemberCall() const {
             return static_cast<MemberCall>(lpFunc);
+        };
+    };
+
+    template <typename TRet, class TThis, typename... TArgs>
+    class Func<StdMemberCall<TRet, TThis, TArgs...>> : protected Func<TRet> {
+        using StdMemberCall = StdMemberCall<TRet, TThis, TArgs...>;
+    public:
+        constexpr Func(int address) : Func<TRet>(address) {};
+
+        template <class TClass>
+        INLINE_CONSTEXPR TRet operator()(const TClass *This, TArgs ...args) const {
+            return static_cast<StdMemberCall<TRet, TClass, TArgs...>>(lpFunc)(This, args...);
+        };
+
+        INLINE_CONSTEXPR TRet operator()(const TThis *This, TArgs ...args) const {
+            return static_cast<StdMemberCall>(lpFunc)(This, args...);
+        };
+
+        INLINE_CONSTEXPR operator StdMemberCall() const {
+            return static_cast<StdMemberCall>(lpFunc);
+        };
+    };
+
+    template <typename TRet, class TThis, typename... TArgs>
+    class Func<VirtualCall<TRet, TThis, TArgs...>> : protected Func<TRet> {
+        using VirtualCall = MemberCall<TRet, TThis, TArgs...>;
+    public:
+        constexpr Func(int address) : Func<TRet>(address) {};
+
+        template <class TClass>
+        INLINE_CONSTEXPR TRet operator()(const TClass *This, TArgs ...args) const {
+            return static_cast<MemberCall<TRet, TClass, TArgs...>>(lpFunc)(This, args...);
+        };
+
+        INLINE_CONSTEXPR TRet operator()(const TThis *This, TArgs ...args) const {
+            return static_cast<VirtualCall>(lpFunc)(This, args...);
+        };
+
+        INLINE_CONSTEXPR operator VirtualCall() const {
+            return static_cast<VirtualCall>(lpFunc);
+        };
+    };
+
+    template <typename TRet, class TThis, typename... TArgs>
+    class Func<StdVirtualCall<TRet, TThis, TArgs...>> : protected Func<TRet> {
+        using StdVirtualCall = StdMemberCall<TRet, TThis, TArgs...>;
+    public:
+        constexpr Func(int address) : Func<TRet>(address) {};
+
+        template <class TClass>
+        INLINE_CONSTEXPR TRet operator()(const TClass *This, TArgs ...args) const {
+            return static_cast<StdMemberCall<TRet, TThis, TArgs...>>(lpFunc)(This, args...);
+        };
+
+        INLINE_CONSTEXPR TRet operator()(const TThis *This, TArgs ...args) const {
+            return static_cast<StdVirtualCall>(lpFunc)(args...);
+        };
+
+        INLINE_CONSTEXPR operator StdVirtualCall() const {
+            return static_cast<StdVirtualCall>(lpFunc);
         };
     };
 

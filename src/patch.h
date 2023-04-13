@@ -188,7 +188,7 @@ namespace mem
         scoped_protector xp(address, sizeof(TType), PAGE_EXECUTE_READWRITE);
 
         if (xp.state() == MEM_OKAY)
-            return *address.ptr<TType>(offset);
+            return *address.ptr<TType>();
 
         return NULL;
     }
@@ -285,5 +285,35 @@ namespace mem
         auto addr = xp.addr();
 
         return fx::write(addr, xp.size(), args...);
+    }
+
+    inline bool nop(auto_ptr address, int count = 1)
+    {
+        constexpr int OP_NOP = 0x90;
+
+        if (count < 1)
+            return false;
+
+        // nops only take up 1 byte each,
+        // so we can use the count directly
+        size_t totalSize = count;
+        {
+            scoped_protector xp(address, totalSize, PAGE_EXECUTE_READWRITE);
+
+            uint8_t *lpDst = address;
+
+            // write out the nop's
+            for (int i = 0; i < count; i++)
+                lpDst[i] = OP_NOP;
+        }
+
+        return true;
+    }
+
+    inline bool nop_range(auto_ptr begin, auto_ptr end)
+    {
+        assert(end > begin);
+
+        return nop(begin, end - begin);
     }
 }
