@@ -6,8 +6,12 @@
 #error Cannot include more than one Hamster-based game header!
 #endif
 
+#include "fuz.h"
+
 #include "CFileChunker.h"
 #include "models.h"
+#include "AIManager.h"
+#include "AICivilianCarManager.h"
 
 #define __DRIV3R_V100 0     // Vanilla
 #define __DRIV3R_V120 1     // Patch 2
@@ -280,6 +284,8 @@ namespace hamster
 class CDriv3r {
 public:
     CDriv3r(int gameVersion);
+
+    void Initialize();
 
     static bool GetGameInfo(RSDSEntry &ppGameInfo);
 

@@ -38,7 +38,9 @@ namespace hamster {
 
 CDriv3r::CDriv3r(int gameVersion) {
     g_GameVersion = gameVersion;
+}
 
+void CDriv3r::Initialize() {
     LogFile::WriteLine("Initializing static offsets...");
 
     g_addrs[HA_ADDR_WINDOW]             = { { 0x7F8340, 0x7EC218 }, "Window" };

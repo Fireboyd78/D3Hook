@@ -15,6 +15,11 @@
 #include "minldr.h"
 #include "util.h"
 
+static ConfigValue<bool> cfgShowConsole         ("ShowConsole", true);
+static ConfigValue<bool> cfgDebugLog            ("DebugLog", 	true);
+
+static ConfigValue<bool> cfgDebugMode           ("DebugMode", 	true);
+
 void Initialize(RSDSEntry& gameInfo);
 
 static void GetAddressName(char* buffer, size_t bufferSize, intptr_t address)
@@ -40,6 +45,165 @@ static void GetAddressName(char* buffer, size_t bufferSize, intptr_t address)
 		sprintf_s(buffer, bufferSize, "%08X (Unknown)", address);
 }
 
+LONG WINAPI CustomUnhandledExceptionFilter(LPEXCEPTION_POINTERS ExceptionInfo)
+{
+	if (!ExceptionInfo || !ExceptionInfo->ExceptionRecord)
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	auto record = ExceptionInfo->ExceptionRecord;
+
+	auto address = record->ExceptionAddress;
+	auto code = record->ExceptionCode;
+	auto flags = record->ExceptionFlags;
+
+	if (code == STATUS_INVALID_HANDLE)
+		return EXCEPTION_CONTINUE_EXECUTION;
+
+	char buffer[512] = { NULL };
+	GetAddressName(buffer, sizeof(buffer), reinterpret_cast<intptr_t>(address));
+
+	LogFile::Format("[CRASH] %08X at %s : %X : %p (%d)\n", code, buffer, flags,
+		record->ExceptionInformation, record->NumberParameters);
+
+	char message[512] = { NULL };
+	sprintf_s(message, "The game has crashed at %s. Press OK to continue execution.", buffer);
+
+	MessageBoxA(NULL, message, "D3Hook", MB_ICONERROR | MB_OK);
+
+	//if (record->NumberParameters > 0)
+	//    RaiseException(code, flags, record->NumberParameters, record->ExceptionInformation);
+
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static LONG NTAPI HandleVariant(PEXCEPTION_POINTERS exceptionInfo)
+{
+	SetForegroundWindow(GetDesktopWindow());
+	return (exceptionInfo->ExceptionRecord->ExceptionCode == STATUS_INVALID_HANDLE)
+		? EXCEPTION_CONTINUE_EXECUTION
+		: EXCEPTION_CONTINUE_SEARCH;
+}
+
+#if defined(HOOK_DLL)
+extern char gamedir[MAX_PATH];
+
+extern int gameversion;
+
+extern fxModule gamemodule;
+extern fxModule mymodule;
+
+bool InitConfigFile()
+{
+	bool configLoaded;
+
+#ifdef HOOK_EXE
+	configLoaded = HookConfig::Initialize(makeToolPath(L"d3hook.ini").c_str());
+#else
+	configLoaded = HookConfig::Initialize("d3hook.ini");
+#endif
+
+	if (cfgShowConsole) {
+		ConsoleLog::Initialize();
+		ConsoleLog::SetTitle("D3Hook Console");
+	}
+
+	return configLoaded;
+}
+
+void InitPath(void) {
+	char dir[MAX_PATH]{ NULL };
+	auto len = GetModuleFileName(NULL, dir, MAX_PATH);
+
+	if (GetPathSpec(dir, gamedir, len)) {
+		SetCurrentDirectory(gamedir);
+	} else {
+		GetCurrentDirectory(MAX_PATH, gamedir);
+	}
+}
+
+bool IsGameSupported(RSDSEntry &gameInfo) {
+	LogFile::WriteLine("Checking for known Driv3r versions...");
+
+	if (CDriv3r::GetGameInfo(gameInfo))
+	{
+		LogFile::Format(" - Detected game version %1.2f\n", gameInfo.fancy_version);
+		return gameInfo.isSupported;
+	} else {
+		LogFile::WriteLine("Unknown module detected! Terminating...");
+		MessageBox(NULL, "Unknown module! D3Hook will now terminate the process.", "D3Hook", MB_OK | MB_ICONERROR);
+
+		ExitProcess(EXIT_FAILURE);
+	}
+
+	return false;
+}
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
+{
+	switch (ul_reason_for_call)
+	{
+		case DLL_PROCESS_ATTACH:
+			{
+				debug("Initializing D3Hook...");
+
+				// initialize module info
+				if (!fxModule::Initialize(mymodule, hModule))
+					LogFile::WriteLine("Couldn't initialize the module info!");
+
+				AddVectoredExceptionHandler(1, HandleVariant);
+				AddVectoredContinueHandler(1, CustomUnhandledExceptionFilter);
+
+				// setup the current directory
+				InitPath();
+
+				LogFile::Initialize("d3hook.log", "--<< D3Hook log file >>--\n");
+
+				bool configLoaded = InitConfigFile();
+
+				LogFile::Format("Working directory is '%s'\n", gamedir);
+
+				if (configLoaded) {
+					LogFile::WriteLine("Configuration file was loaded successfully.");
+				} else {
+					LogFile::WriteLine("No configuration file was found.");
+				}
+
+				HMODULE hDI8Module = NULL;
+				RSDSEntry gameInfo;
+
+				if (IsGameSupported(gameInfo))
+				{
+					if (LoadSystemLibrary("dinput8.dll", &hDI8Module) &&
+						GetHookProcAddress(hDI8Module, "DirectInput8Create", (FARPROC*)&lpDI8Create))
+					{
+						LogFile::WriteLine("Injected into the game process successfully.");
+
+						// initialize the hook
+						Initialize(gameInfo);
+					}
+					else
+					{
+						LogFile::WriteLine("Failed to inject into the game process.");
+						MessageBox(NULL, "Could not inject into the game process. Unknown errors may occur.", "D3Hook", MB_OK | MB_ICONWARNING);
+					}
+				}
+				else
+				{
+					LogFile::WriteLine("Unsupported game version! Terminating...");
+					MessageBox(NULL, "Sorry, this version of Driv3r is unsupported. Please remove D3Hook to launch the game.", "D3Hook", MB_OK | MB_ICONERROR);
+
+					ExitProcess(EXIT_FAILURE);
+				}
+			} break;
+		case DLL_THREAD_ATTACH:
+		case DLL_THREAD_DETACH:
+		case DLL_PROCESS_DETACH:
+			break;
+	}
+
+	return true;
+}
+#elif defined(HOOK_EXE)
 void WINAPI GetStartupInfoA_Stub(LPSTARTUPINFOA lpStartupInfo)
 {
 	GetStartupInfoA(lpStartupInfo);
@@ -71,45 +235,6 @@ const char* WINAPI GetCommandLineA_Fake()
 	return fakeCmdl.c_str();
 }
 
-LONG WINAPI CustomUnhandledExceptionFilter(LPEXCEPTION_POINTERS ExceptionInfo)
-{
-    if (!ExceptionInfo || !ExceptionInfo->ExceptionRecord)
-        return EXCEPTION_CONTINUE_SEARCH;
-
-    auto record = ExceptionInfo->ExceptionRecord;
-
-    auto address = record->ExceptionAddress;
-    auto code = record->ExceptionCode;
-    auto flags = record->ExceptionFlags;
-
-    if (code == STATUS_INVALID_HANDLE)
-        return EXCEPTION_CONTINUE_EXECUTION;
-
-    char buffer[512] = { NULL };
-    GetAddressName(buffer, sizeof(buffer), reinterpret_cast<intptr_t>(address));
-
-    LogFile::Format("[CRASH] %08X at %s : %X : %p (%d)\n", code, buffer, flags,
-        record->ExceptionInformation, record->NumberParameters);
-
-    char message[512] = { NULL };
-    sprintf_s(message, "The game has crashed at %s. Press OK to continue execution.", buffer);
-
-    MessageBoxA(NULL, message, "D3Hook", MB_ICONERROR | MB_OK);
-
-    //if (record->NumberParameters > 0)
-    //    RaiseException(code, flags, record->NumberParameters, record->ExceptionInformation);
-
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-
-static LONG NTAPI HandleVariant(PEXCEPTION_POINTERS exceptionInfo)
-{
-	SetForegroundWindow(GetDesktopWindow());
-	return (exceptionInfo->ExceptionRecord->ExceptionCode == STATUS_INVALID_HANDLE)
-		? EXCEPTION_CONTINUE_EXECUTION
-		: EXCEPTION_CONTINUE_SEARCH;
-}
-
 static void invokeEntry(void(*ep)())
 {
 	// SEH call to prevent STATUS_INVALID_HANDLE
@@ -138,7 +263,12 @@ static void buildDirectoryStructure()
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
 {
-	LogFile::WriteLine("Initializing D3Hook...");
+	debug("Initializing D3Hook...");
+
+	LogFile::Initialize(makeToolPath(L"logs\\d3hook.log").c_str(), "--<< D3Hook log file >>--\n");
+
+	bool configLoaded = InitConfigFile();
+
 	buildDirectoryStructure();
 
 	auto gamePath = makeGamePath(L"");
@@ -159,6 +289,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	SetDllDirectoryW(gamePath.c_str());
 
 	LogFile::Format("Game directory is '%S'\n", gamePath.c_str());
+
+	if (configLoaded) {
+		LogFile::WriteLine("Configuration file was loaded successfully.");
+	} else {
+		LogFile::WriteLine("No configuration file was found.");
+	}
 
 	FILE* game_file = nullptr;
 	_wfopen_s(&game_file, makeGamePath(L"Driv3r.exe").c_str(), L"rb");
@@ -220,3 +356,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	invokeEntry(entry);
 	return 0;
 }
+
+#else
+#error "Unknown platform!"
+#endif

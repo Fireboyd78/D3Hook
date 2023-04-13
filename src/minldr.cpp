@@ -1,6 +1,7 @@
 
 // Copyright (C) Force67
 
+#if defined(HOOK_EXE)
 #include <algorithm>
 #include <intrin.h>
 #include "minldr.h"
@@ -156,3 +157,4 @@ bool minLdr::load(HMODULE mod)
 	//auto* peb = (char*)__readfsdword(0x30);
 	//*(uintptr_t*)(peb + 8) = 
 }
+#endif

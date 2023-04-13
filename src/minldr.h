@@ -2,6 +2,7 @@
 
 // Copyright (C) Force67
 
+#if defined(HOOK_EXE)
 #include <cstdint>
 #include <Windows.h>
 
@@ -37,3 +38,4 @@ private:
 	template <class T> inline const T* GetRVA(uint32_t rva) { return (T*)(bin + rva); }
 	template <class T> inline T* GetTargetRVA(uint32_t rva) { return (T*)((uint8_t*)handle + rva); }
 };
+#endif

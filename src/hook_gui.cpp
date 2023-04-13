@@ -1,5 +1,7 @@
 #include "hook_gui.h"
 #include "imgui.h"
+#include "console.h"
+#include "logfile.h"
 
 #include <tchar.h>
 
@@ -17,6 +19,9 @@
 
 #pragma comment(lib, "xinput")
 #endif
+
+//#define GUI_LOG(msg, ...) LogFile::Printf(2, __FUNCTION__ ": " msg, __VA_ARGS__)
+#define GUI_LOG(msg, ...) __noop(msg, __VA_ARGS__)
 
 // DirectX data
 static LPDIRECT3DDEVICE9        g_pd3dDevice = NULL;
@@ -206,6 +211,8 @@ void gui::device::RenderDrawData(ImDrawData* draw_data)
 
 bool gui::device::Initialize(IDirect3DDevice9* device)
 {
+    GUI_LOG("Initializing device");
+
     // Setup back-end capabilities flags
     ImGuiIO& io = ImGui::GetIO();
     io.BackendRendererName = "fiero";
@@ -218,6 +225,8 @@ bool gui::device::Initialize(IDirect3DDevice9* device)
 
 void gui::device::Shutdown()
 {
+    GUI_LOG("Shutting down device");
+
     gui::device::InvalidateDeviceObjects();
     if (g_pd3dDevice) { /*g_pd3dDevice->Release();*/ g_pd3dDevice = NULL; }
 }
@@ -251,15 +260,26 @@ bool gui::device::CreateDeviceObjects()
 {
     if (!g_pd3dDevice)
         return false;
-    if (!CreateFontsTexture())
-        return false;
-    return true;
+
+    GUI_LOG("Creating font texture");
+
+    bool success = CreateFontsTexture();
+
+    if (success)
+        GUI_LOG(" - Complete");
+    else
+        GUI_LOG(" - FAILURE!");
+        
+    return success;
 }
 
 void gui::device::InvalidateDeviceObjects()
 {
     if (!g_pd3dDevice)
         return;
+
+    GUI_LOG("Invalidating objects");
+
     if (g_pVB) { g_pVB->Release(); g_pVB = NULL; }
     if (g_pIB) { g_pIB->Release(); g_pIB = NULL; }
     if (g_FontTexture) { g_FontTexture->Release(); g_FontTexture = NULL; ImGui::GetIO().Fonts->TexID = NULL; } // We copied g_pFontTextureView to io.Fonts->TexID so let's clear that as well.
@@ -284,6 +304,8 @@ static bool                 g_WantUpdateHasGamepad = true;
 
 bool gui::runtime::Initialize(void *hwnd)
 {
+    GUI_LOG("Initializing runtime");
+
     if (!::QueryPerformanceFrequency((LARGE_INTEGER *)&g_TicksPerSecond))
         return false;
     if (!::QueryPerformanceCounter((LARGE_INTEGER *)&g_Time))
@@ -326,6 +348,8 @@ bool gui::runtime::Initialize(void *hwnd)
 
 void gui::runtime::Shutdown()
 {
+    GUI_LOG("Shutting down runtime");
+
     g_hWnd = (HWND)0;
 }
 
@@ -555,6 +579,8 @@ LRESULT gui::runtime::WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 
 void gui::BeginFrame()
 {
+    GUI_LOG("Begin frame");
+
     // Start the Dear ImGui frame
     gui::device::NewFrame();
     gui::runtime::NewFrame();
@@ -564,6 +590,7 @@ void gui::BeginFrame()
 
 void gui::EndFrame()
 {
+    GUI_LOG("End of frame");
     ImGui::EndFrame();
 }
 
@@ -584,6 +611,8 @@ void gui::Render()
 
 void gui::Reset()
 {
+    GUI_LOG("Resetting...");
+
     // we'll let the next frame re-create it
     gui::device::InvalidateDeviceObjects();
 }

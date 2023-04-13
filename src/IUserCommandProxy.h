@@ -1,7 +1,19 @@
 #pragma once
 #include "hook.h"
 
-class IUserCommand {
+struct IInterface
+{
+public:
+    virtual ~IInterface() {};
+};
+
+class ITask
+{
+public:
+    virtual bool AreYouDoneYet(void) THUNK;
+};
+
+class IUserCommand : IInterface {
 public:
 	virtual void ProcessCommand(const char *command, const char *parameters) THUNK;
 };

@@ -8,6 +8,7 @@
 
 #define _CRT_NON_CONFORMING_SWPRINTFS
 #define _CRT_SECURE_NO_WARNINGS
+#define _ENABLE_EXTENDED_ALIGNED_STORAGE
 
 #define DLLEXPORT __declspec(dllexport)
 
@@ -29,8 +30,17 @@
 
 #include <utility>
 
+#ifdef HOOK_EXE
+using filename_t = LPCWSTR;
+#else
+using filename_t = LPCSTR;
+#endif
+
+#include "settings.h"
+
 #include "util.h"
 #include "logfile.h"
+#include "console.h"
 
 //  C4091: '__declspec(novtable)': ignored on left of 'x' when no variable is declared
 #pragma warning (disable : 4091)

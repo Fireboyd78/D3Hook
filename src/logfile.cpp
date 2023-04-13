@@ -1,74 +1,183 @@
 #include "logfile.h"
-#include "util.h"
+#include "console.h"
 
-namespace LogFile {
-    bool bCreateLog = true;
+/*
+    LogFileStream
+*/
 
-    bool bAppendLine = false;
-    bool bIgnoreBuffer = false;
+static char g_LogBuffer[8192] { NULL };
 
-    void Write(LPCSTR str)
-    {
-        if (!bIgnoreBuffer)
-        {
-            // also output a debug message
-            OutputDebugStringA(str);
-        }
+LogFileStream::LogFileStream(LPCSTR filename, bool append)
+{
+    m_filename = filename;
+    this->SetAppendMode(append);
+}
 
-        FILE* logFile = nullptr;
-        _wfopen_s(&logFile, makeToolPath(L"logs\\d3hook.log").c_str(), bCreateLog ? L"w" : L"a+");
+void LogFileStream::Close(void)
+{
+    if (m_file != NULL)
+        fclose(m_file);
+}
 
-        if (logFile == nullptr)
-        {
-            debug("Failed to open the log file!");
-            return;
-        }
+void LogFileStream::SetAppendMode(bool append)
+{
+    if (m_file != NULL)
+        fclose(m_file);
 
-        if (bCreateLog)
-        {
-            fprintf(logFile, "--<< D3Hook log file >>--\n\n");
-            bCreateLog = false;
-        }
+#ifdef HOOK_EXE
+    _wfopen_s(&m_file, m_filename, (append) ? L"a+" : L"w");
+#else
+    fopen_s(&m_file, m_filename, (append) ? "a+" : "w");
+#endif
 
-        if (!bIgnoreBuffer)
-        {
-            int strLen = strlen(str);
-
-            if (strLen > 0)
-                fwrite(str, 1, strLen, logFile);
-        }
-
-        if (bAppendLine)
-        {
-            fprintf(logFile, "\n");
-            bAppendLine = false; // disable since we're done
-        }
-
-        fclose(logFile);
+    if (m_file == NULL) {
+        debug((append) ? "Failed to open the log file!" : "Failed to create the log file!");
+    } else {
+        setvbuf(m_file, g_LogBuffer, _IOFBF, sizeof(g_LogBuffer));
     }
+}
 
-    void WriteLine(LPCSTR str)
-    {
-        bAppendLine = true; // disabled after use
-        Write(str);
+LogFileStream* LogFileStream::Create(filename_t filename, LPCSTR title)
+{
+    auto log = new LogFileStream(filename);
+
+    if (title != NULL)
+        log->WriteLine(title);
+
+    log->SetAppendMode(true);
+
+    return log;
+}
+
+LogFileStream* LogFileStream::Create(filename_t filename)
+{
+    return LogFileStream::Create(filename, NULL);
+}
+
+LogFileStream* LogFileStream::Open(filename_t filename)
+{
+    return new LogFileStream(filename, true);
+}
+
+void LogFileStream::Flush(bool force)
+{
+    if (force) {
+        Close();
+        SetAppendMode(true);
+    } else {
+        fflush(m_file);
     }
+}
 
-    void Format(LPCSTR format, ...)
-    {
-        char buf[__LOGFMT_BUF_SIZE];
-        va_list va;
-        va_start(va, format);
-        _vsnprintf(buf, sizeof(buf), format, va);
-        va_end(va);
+void LogFileStream::AppendLine(void)
+{
+    fputs("\n", m_file);
+    Flush(true);
+}
 
-        Write(buf);
-    }
+void LogFileStream::Format(LPCSTR format, ...)
+{
+    char buffer[__LOGFMT_BUF_SIZE] { NULL };
+    
+    va_list va;
+    va_start(va, format);
+    vsprintf_s(buffer, format, va);
+    va_end(va);
 
-    void AppendLine(void)
-    {
-        bAppendLine = true;
-        bIgnoreBuffer = true;
-        Write(NULL);
-        bIgnoreBuffer = false;
-    }
+    Write(buffer);
+}
+
+void LogFileStream::Write(LPCSTR str)
+{
+    int strLen = strlen(str);
+
+    if (strLen > 0)
+        fputs(str, m_file);
+}
+
+void LogFileStream::WriteLine(LPCSTR str)
+{
+    Write(str);
+    AppendLine();
+}
+
+/*
+    LogFile
+*/
+
+LogFileStream *g_logfile = NULL;
+char g_logfile_buffer[__LOGFMT_BUF_SIZE] = { NULL };
+
+void LogFile::Initialize(filename_t filename) {
+    LogFile::Initialize(filename, NULL);
+};
+
+void LogFile::Initialize(filename_t filename, LPCSTR title) {
+    g_logfile = LogFileStream::Create(filename, title);
+};
+
+void LogFile::Close(void) {
+    g_logfile->Flush(false);
+    g_logfile->Close();
+};
+
+void LogFile::Flush(bool force) {
+    g_logfile->Flush(force);
+}
+
+void LogFile::AppendLine(void) {
+    g_logfile->AppendLine();
+    ConsoleLog::AppendLine();
+};
+
+void LogFile::Write(LPCSTR str) {
+    g_logfile->Write(str);
+    g_logfile->Flush(false);
+
+    ConsoleLog::Write(str);
+};
+
+void LogFile::WriteLine(LPCSTR str) {
+    g_logfile->WriteLine(str);
+    ConsoleLog::WriteLine(str);
+};
+
+void LogFile::Format(LPCSTR format, ...) {
+    va_list va;
+    va_start(va, format);
+    vsprintf(g_logfile_buffer, format, va);
+    va_end(va);
+
+    g_logfile->Write(g_logfile_buffer);
+    g_logfile->Flush(true);
+
+    ConsoleLog::Write(g_logfile_buffer);
+};
+
+void LogFile::Print(int level, LPCSTR str) {
+    static char * Prefixes[5] = {
+        "",                 // print
+        "",                 // debug
+        "Warning: ",        // warning
+        "Error: ",          // error
+        "FATAL ERROR: ",    // fatal error
+    };
+    
+    sprintf_s(g_logfile_buffer, "%s%s", Prefixes[level], str);
+
+    g_logfile->WriteLine(g_logfile_buffer);
+    g_logfile->Flush(true);
+
+    ConsoleLog::Print(level, g_logfile_buffer);
+}
+
+void LogFile::Printf(int level, LPCSTR format, ...) {
+    char buffer[__LOGFMT_BUF_SIZE] { NULL };
+
+    va_list va;
+    va_start(va, format);
+    vsprintf_s(buffer, format, va);
+    va_end(va);
+
+    Print(level, buffer);
 }

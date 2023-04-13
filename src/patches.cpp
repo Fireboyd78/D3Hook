@@ -1,8 +1,8 @@
 
 #include "main.h"
 
-//#define USE_GUI
-//#define DRAW_GUI 0
+#define USE_GUI
+#define DRAW_GUI 1
 
 #include "imgui.h"
 
@@ -27,12 +27,12 @@ IUserCommandProxyHook* pUserCmdProxyHook;
 WNDPROC hProcOld;
 LRESULT APIENTRY WndProcNew(HWND, UINT, WPARAM, LPARAM);
 
-static char gamedir[MAX_PATH]{ NULL };
+char gamedir[MAX_PATH]{ NULL };
 
-static int gameversion = 0;
+int gameversion = 0;
 
-static fxModule gamemodule;
-static fxModule mymodule;
+fxModule gamemodule;
+fxModule mymodule;
 
 #ifdef USE_GUI
 static bool g_bGUIWaiting = false;
@@ -49,7 +49,7 @@ static void DrawGUI() {
         g_bGUIWaiting = false;
     }
 
-    if (g_bGUIReady) {
+    if (g_bGUIFocus) {
         gui::BeginFrame();
         gui::Update();
         gui::Render();
@@ -166,40 +166,102 @@ bool SubclassGameWindow(HWND gameWnd, WNDPROC pWndProcNew, WNDPROC* ppWndProcOld
 {
     if (gameWnd != NULL)
     {
-        WNDPROC hProcOld = (WNDPROC)GetWindowLong(gameWnd, GWL_WNDPROC);
+        WNDPROC hProcOld = (WNDPROC)GetWindowLongA(gameWnd, GWL_WNDPROC);
 
         *ppWndProcOld = hProcOld;
-
-        if (hProcOld != NULL && SetWindowLong(gameWnd, GWL_WNDPROC, (LONG)pWndProcNew))
+        
+        if (hProcOld != NULL && SetWindowLongA(gameWnd, GWL_WNDPROC, (LONG)pWndProcNew))
             return true;
     }
     return false;
 };
 
-void HandlePanicButton(DWORD vKey)
+enum class EKeyState
 {
-    static int exit_presses = 0;
+    None,
+    Down,
+    Up,
+};
 
-    if (vKey == VK_OEM_3)
+static uint16_t g_KeyState[256] = { 0 };
+
+bool FlushKeyState(uint8_t vKey)
+{
+    uint16_t *state = &g_KeyState[vKey];
+
+    if (*state == 0)
+        return true;
+
+    if (*state & KF_UP)
     {
-        if (++exit_presses == 2)
-        {
-            // ABORT MISSION!!!
-            ExitProcess(EXIT_SUCCESS);
-        }
+        //LogFile::Format("** reset key %X\n", vKey);
+        *state = 0;
+        return true;
     }
-    else {
-        exit_presses = 0;
-    }
+
+    return false;
 }
 
-static DWORD g_LastKey = 0;
-
-bool HandleKeyPress(DWORD vKey)
+bool KeyRepeated(uint8_t vKey)
 {
-    g_LastKey = vKey;
+    return g_KeyState[vKey] & KF_REPEAT;
+}
 
-    HandlePanicButton(vKey);
+EKeyState KeyState(uint8_t vKey)
+{
+    uint16_t state = g_KeyState[vKey];
+
+    if (state != 0)
+    {
+        if (state & KF_UP)
+            return EKeyState::Up;
+
+        return EKeyState::Down;
+    }
+
+    return EKeyState::None;
+}
+
+static uint8_t g_LastKey = 0;
+
+void UpdateKeyState(uint32_t vKey, uint32_t params)
+{
+    uint16_t keyFlags = (params >> 16) & 0xFFFF;
+    uint16_t scanCode = keyFlags & 0xFF;
+
+    if (keyFlags & KF_EXTENDED)
+        scanCode |= 0xE000;
+
+    switch (vKey)
+    {
+    case VK_SHIFT:
+    case VK_CONTROL:
+    case VK_MENU:
+    {
+        // set the general button too
+        g_KeyState[vKey] = keyFlags;
+
+        uint32_t vKeyOld = vKey;
+        vKey = LOWORD(MapVirtualKeyW(scanCode, MAPVK_VSC_TO_VK_EX));
+        //LogFile::Format("** scancode %s %04X = key %X->%X\n", (keyFlags & KF_UP) ? "up" : "down", scanCode, vKeyOld, vKey);
+    } break;
+    default:
+        // flush the modifier keys
+        FlushKeyState(VK_SHIFT);
+        FlushKeyState(VK_CONTROL);
+        FlushKeyState(VK_MENU);
+
+        //LogFile::Format("** scancode %s %04X = key %x\n", (keyFlags & KF_UP) ? "up" : "down", scanCode, vKey);
+        break;
+    }
+
+    g_KeyState[vKey] = keyFlags;
+}
+
+bool HandleKeyPress(uint8_t vKey)
+{
+    if (KeyState(vKey) != EKeyState::Up)
+        return false;
 
     switch (vKey) {
 #ifdef USE_GUI
@@ -402,16 +464,21 @@ bool HandleKeyPress(DWORD vKey)
     }
     case VK_F8:
     {
-        auto addr = (intptr_t**)hamster::GetSingletonObjectsPointer();
+        //--auto addr = (intptr_t**)hamster::GetSingletonObjectsPointer();
+        //--
+        //--for (int i = 0; i < static_cast<int>(hamster::ESingletonType::MAX_COUNT); i++) {
+        //--    auto ptr = &addr[i];
+        //--
+        //--    if (*ptr == nullptr)
+        //--        continue;
+        //--
+        //--    LogFile::Format("singleton[%02X] @ %08X : %08X -> %08X\n", i, ptr, *ptr, **ptr /* vtable */);
+        //--}
 
-        for (int i = 0; i < static_cast<int>(hamster::ESingletonType::MAX_COUNT); i++) {
-            auto ptr = &addr[i];
+        LogFile::WriteLine("Reloading all config values...");
 
-            if (*ptr == nullptr)
-                continue;
-
-            LogFile::Format("singleton[%02X] @ %08X : %08X -> %08X\n", i, ptr, *ptr, **ptr /* vtable */);
-        }
+        HookConfig::Read();
+        ConfigWatch::ReloadAll();
 
         return true;
     }
@@ -541,6 +608,8 @@ protected:
 
     int InitShaderFX()
     {
+        int shadersLoaded = 0;
+
         if (gameversion == __DRIV3R_V100)
         {
             /* Loads shaders from AllShaders.chunk */
@@ -548,8 +617,8 @@ protected:
 
             int errorCode = 0;
 
-            LogFile::WriteLine("Loading shaders chunk...");
-            if (shadersChunk.OpenChunks("D3Hook:shaders\\AllShaders.chunk"))
+            LogFile::WriteLine("Loading shaders package...");
+            if (shadersChunk.OpenChunks("shaders\\AllShaders.chunk"))
             {
                 int nShaders = shadersChunk.GetChunkCount();
 
@@ -584,20 +653,24 @@ protected:
                     }
                 }
 
-                shadersChunk.Release();
+                if (errorCode == 0)
+                    shadersLoaded = 1;
             }
             else
             {
-                MessageBoxW(hamster::GetMainWindow(), L"FATAL ERROR: Cannot open the shaders file!", L"D3Hook", MB_OK | MB_ICONERROR);
-                return E_FAIL;
+                LogFile::WriteLine(" - Not found.");
             }
 
-            // something went wrong, abort
-            if (errorCode != 0)
+            shadersChunk.Release();
+
+            if (errorCode < 0)
                 return errorCode;
         }
-        else
+        
+        if (!shadersLoaded)
         {
+            LogFile::WriteLine("Loading shaders in memory...");
+
             for (auto shader : shader_programs) {
                 /* Loads shader from EXE */
                 auto shaderInfo = shader.info[gameversion];
@@ -610,37 +683,36 @@ protected:
             }
         }
 
-        // what the actual fuck is this structure though
-        fiero::Type<int[2880]> bins(addressof(0x8E6718, 0x8ACCC8));
+        fiero::Type<int[48][4][3][5]> substanceFXTable(addressof(0x8E6718, 0x8ACCC8));
 
-        memset(bins, 0, bins.length());
+        memset(substanceFXTable, 0, substanceFXTable.size());
 
-        bins[75] = 1;
-        bins[80] = 2;
-        bins[95] = 3;
-        bins[81] = 5;
-        bins[96] = 6;
-        bins[99] = 9;
+        substanceFXTable[1][1][0][0] = 1;
+        substanceFXTable[1][1][1][0] = 2;
+        substanceFXTable[1][2][1][0] = 3;
+        substanceFXTable[1][1][1][1] = 5;
+        substanceFXTable[1][2][1][1] = 6;
+        substanceFXTable[1][2][1][4] = 9;
 
-        bins[1413] = 24;
-        bins[1653] = 28;
+        substanceFXTable[23][2][0][3] = 24;
+        substanceFXTable[27][2][0][3] = 28;
 
-        bins[620] = 11;
+        substanceFXTable[10][1][1][0] = 11;
 
-        bins[735] = 12;
-        bins[740] = 12;
-        bins[755] = 12;
+        substanceFXTable[12][1][0][0] = 12;
+        substanceFXTable[12][1][1][0] = 12;
+        substanceFXTable[12][2][1][0] = 12;
 
-        bins[1533] = 26;
+        substanceFXTable[25][2][0][3] = 26;
 
-        bins[1815] = 30;
-        bins[1840] = 32;
-        bins[1825] = 31;
+        substanceFXTable[30][1][0][0] = 30;
+        substanceFXTable[30][2][2][0] = 32;
+        substanceFXTable[30][1][2][0] = 31;
 
-        bins[2055] = 34;
-        bins[2056] = 35;
-        bins[2061] = 36;
-        bins[2076] = 37;
+        substanceFXTable[34][1][0][0] = 34;
+        substanceFXTable[34][1][0][1] = 35;
+        substanceFXTable[34][1][1][1] = 36;
+        substanceFXTable[34][2][1][1] = 37;
 
         LogFile::WriteLine("Finished initializing shaders!");
         return 0;
@@ -1230,7 +1302,7 @@ public:
     {
         auto manager = _Manager.get(this);
 
-        manager->dumpstateparams(state, pRenderStates, nRenderStates, pTextureStates, nTextureStates, pSamplerStates, nSamplerStates);
+        //manager->dumpstateparams(state, pRenderStates, nRenderStates, pTextureStates, nTextureStates, pSamplerStates, nSamplerStates);
 
         if (nRenderStates > 0)
             d3dStateManager_SetRenderStateParams(manager, state, pRenderStates, nRenderStates);
@@ -1596,7 +1668,7 @@ public:
 
 #ifdef USE_GUI
     HRESULT Present(long hwndOverride) {
-        auto result = fiero::as<renderer>::func<HRESULT, long>(0x5DA840)(this, hwndOverride);
+        auto result = fiero::Func<decltype(&rendererHandler::Present)>(0x5DA840)(this, hwndOverride);
 #if DRAW_GUI
         if (result == D3DERR_DEVICELOST) {
             if (pD3DDevice->TestCooperativeLevel() == D3DERR_DEVICENOTRESET)
@@ -1606,9 +1678,9 @@ public:
         return result;
     }
 
-    void Draw() {
+    void Draw(D3DVIEWPORT9 *viewport) {
         // let the game go first
-        fiero::as<renderer>::func<void>(0x5DA660)(this);
+        fiero::Func<decltype(&rendererHandler::Draw)>(0x5DA660)(this, viewport);
 
         // now we draw our gui :)
         DrawGUI();
@@ -1716,14 +1788,13 @@ public:
     virtual const char* GetAudioLanguageString() = 0;
 };
 
+#if defined(HOOK_EXE)
+#define FILESYS_HOOK 1
+#else
+#define FILESYS_HOOK 0
+#endif
+#if FILESYS_HOOK
 #pragma pack(push, 1) 
-
-template<typename TRet, typename ...Args>
-inline TRet HACK_callthis(LPVOID lpFunc, Args ...args) {
-    return (*(TRet(__thiscall*)(Args...))lpFunc)(args...);
-}
-
-
 class CFileSystemPC {
 
 public:
@@ -1807,19 +1878,57 @@ private:
     uint8_t pad1[424 - 266];
 };
 #pragma pack(pop) 
+#endif
 
 intptr_t fnFrameworkRun;
 
 class FrameworkHandler : public IFramework {
+protected:
+    //static fiero::Field<0x1C, bool> _ForceQuit;
 public:
+    //static void Shutdown() {
+    //    IFramework *framework = hamster::SingletonVar<hamster::ESingletonType::Framework, IFramework>::Get();
+    //
+    //    if (framework == nullptr)
+    //        ExitProcess(EXIT_SUCCESS);
+    //
+    //    _ForceQuit.set(framework, true);
+    //}
+
+    static void HandlePanicButton()
+    {
+        static int exit_presses = 0;
+
+        EKeyState state = KeyState(VK_OEM_3);
+
+        if (state == EKeyState::Up)
+        {
+            if (++exit_presses == 3)
+            {
+                // ABORT MISSION!!!
+                ExitProcess(EXIT_SUCCESS);
+            }
+        }
+        else if (state == EKeyState::None) {
+            exit_presses = 0;
+        }
+    }
+
     void Run() {
         bool subclassWindow = true;
         bool canUseGui = false;
 
         auto hwnd = hamster::GetMainWindow();
+        auto parent = GetParent(hwnd);
+
+        if (parent != NULL && parent != hwnd)
+            hwnd = parent;
 
         if (subclassWindow)
         {
+            if (hwnd == parent)
+                LogFile::WriteLine("got the parent!");
+
             LogFile::Write("Subclassing window...");
 
             if (SubclassGameWindow(hwnd, WndProcNew, &hProcOld))
@@ -1916,11 +2025,10 @@ public:
     }
 };
 
-// TODO: make this configurable
-static bool g_bIsWindowed = false;
+static ConfigValue<bool> cfgWindowed            ("Windowed",    true);
 
 static BOOL WindowUpdated(HWND hWnd, int width, int height, bool repaint) {
-    if (g_bIsWindowed)
+    if (cfgWindowed)
     {
         HDC hDC = GetDC(NULL);
         int screenWidth = GetDeviceCaps(hDC, HORZRES);
@@ -1938,8 +2046,8 @@ static BOOL WindowUpdated(HWND hWnd, int width, int height, bool repaint) {
     return FALSE;
 }
 
-static BOOL WindowUpdated(HWND hWnd) {
-    if (g_bIsWindowed)
+static BOOL WindowUpdated(HWND hWnd, bool refocus) {
+    if (cfgWindowed)
     {
         RECT rect;
         GetWindowRect(hWnd, &rect);
@@ -1948,7 +2056,14 @@ static BOOL WindowUpdated(HWND hWnd) {
         int height = rect.bottom - rect.top;
 
         LogFile::Format("Updating window (%dx%d)\n", width, height);
-        return WindowUpdated(hWnd, width, height, false);
+        
+        if (WindowUpdated(hWnd, width, height, false))
+        {
+            if (refocus)
+                SetFocus(hWnd);
+
+            return TRUE;
+        }
     }
 
     return FALSE;
@@ -1957,20 +2072,21 @@ static BOOL WindowUpdated(HWND hWnd) {
 LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 #ifdef USE_GUI
-    if (g_bGUIReady
-        && g_bGUIFocus
-        && gui::runtime::WndProcHandler(hWnd, uMsg, wParam, lParam))
-        return true;
+    if (g_bGUIReady && g_bGUIFocus)
+    {
+        if (gui::runtime::WndProcHandler(hWnd, uMsg, wParam, lParam))
+            return 1;
+    }
 #endif
     switch (uMsg) {
-    case WM_DESTROY:
 #ifdef USE_GUI
+    case WM_DESTROY:
         if (g_bGUIReady) {
             gui::Shutdown();
             g_bGUIReady = false;
         }
-#endif
         break;
+#endif
 #ifdef USE_GUI
     case WM_SIZE:
         if (g_bGUIReady)
@@ -1985,15 +2101,32 @@ LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
         break;
 #endif
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
     case WM_KEYUP:
-        if (HandleKeyPress((DWORD)wParam))
+    case WM_SYSKEYUP:
+    {
+        uint32_t vKey = (uint32_t)wParam;
+        uint32_t flags = (uint32_t)lParam;
+
+        UpdateKeyState(vKey, flags);
+
+        FrameworkHandler::HandlePanicButton();
+
+        bool handled = HandleKeyPress(vKey);
+
+        FlushKeyState(g_LastKey);
+        g_LastKey = vKey;
+
+        if (handled)
             return 0;
-        break;
+    } break;
     }
 
-    return CallWindowProc(hProcOld, hWnd, uMsg, wParam, lParam);
+    return CallWindowProcA(hProcOld, hWnd, uMsg, wParam, lParam);
 }
 
+#if defined(HOOK_EXE)
 static void DSLog_Imp(const char *str)
 {
     bool createFile = *(bool*)0x007A2C18;
@@ -2012,6 +2145,7 @@ static void DSLog_Imp(const char *str)
 	fwrite(static_cast<const void*>(str), 1u, std::strlen(str), logHandle);
 	fclose(logHandle);
 }
+#endif
 
 class HamsterViewport {
 protected:
@@ -2047,9 +2181,17 @@ class HamsterViewportHandler : public HamsterViewport {
 public:
     HRESULT UpdateDevices() {
         if (this->Windowed)
-            WindowUpdated(this->Hwnd);
+            WindowUpdated(this->Hwnd, false);
 
-        return fiero::as<HamsterViewport>::func<HRESULT>(cbUpdateDevices)(this);
+        return fiero::Func<decltype(&HamsterViewportHandler::UpdateDevices)>(cbUpdateDevices)(this);
+    }
+
+    HRESULT UpdateWindow(int bpp, bool windowed)
+    {
+        return fiero::Func<decltype(&HamsterViewportHandler::UpdateWindow)>(cbUpdateWindow)(this, bpp, this->Windowed);
+
+        if (this->Windowed)
+            WindowUpdated(this->Hwnd, true);
     }
 
     static bool Install() {
@@ -2058,8 +2200,11 @@ public:
             return false;
         }
 
-        InstallCallback("Updates the window upon initialization.",
+        InstallCallback("HamsterViewport::UpdateDevices", "Updates the window upon initialization.",
             &UpdateDevices, cbHook<CALL>(0x5AF06C), &cbUpdateDevices);
+
+        InstallCallback("HamsterViewport::UpdateWindow", "Updates the window with respect to windowed mode.",
+            &UpdateWindow, cbHook<CALL>(0x5A5F0B), &cbUpdateWindow);
 
         return true;
     }
@@ -2068,7 +2213,7 @@ public:
 class WindowedModeHandler {
 public:
     bool SetActiveDisplayMode(void* params) {
-        if (g_bIsWindowed)
+        if (cfgWindowed)
         {
             fiero::Type<HWND> hWnd(0x7F8340);
 
@@ -2083,7 +2228,8 @@ public:
 
             auto info = reinterpret_cast<display_settings*>(params);
 
-            WindowUpdated(hWnd, info->display_res_width, info->display_res_height, true);
+            if (WindowUpdated(hWnd, info->display_res_width, info->display_res_height, true))
+                SetFocus(hWnd);
         }
 
         return true;
@@ -2101,21 +2247,715 @@ public:
             }
         );
 
-        // windowed mode! :D
-        mem::write<uint32_t>(0x5B799F + 1, WS_POPUP | WS_CAPTION | WS_SYSMENU);
+        if (cfgWindowed)
+        {
+            // windowed mode! :D
+            mem::write<uint32_t>(0x5B799F + 1, WS_POPUP | WS_CAPTION | WS_SYSMENU);
 
-        // initialize/update in windowed mode
-        mem::write<uint8_t>(0x5A5F03 + 1, 1);
-        mem::write<uint8_t>(0x5AEFD7 + 4, 1);
+            // initialize/update in windowed mode
+            mem::write<uint8_t>(0x5A5F03 + 1, 1);
+            mem::write<uint8_t>(0x5AEFD7 + 4, 1);
 
-        // *sigh*
-        mem::write<uint8_t, uint8_t>(0x5A5E85, 0x90, 0x90);
-        mem::write<uint8_t, uint8_t>(0x5A5EE0, 0x90, 0x90);
-        mem::write<uint8_t, uint8_t>(0x5D4A10, 0x90, 0x90);
-        mem::write<uint8_t, uint8_t>(0x5D4A1C, 0x90, 0x90);
+            // *sigh*
+            //mem::write<uint8_t, uint8_t>(0x5A5E85, 0x90, 0x90); // always set window size
+            mem::write<uint8_t, uint8_t>(0x5A5EE0, 0x90, 0x90); // always set display
+            //mem::write<uint8_t, uint8_t>(0x5D4A10, 0x90, 0x90); // always update window
+            //mem::write<uint8_t, uint8_t>(0x5D4A1C, 0x90, 0x90);
 
-        // TODO: make this configurable
-        g_bIsWindowed = true;
+            // patch windowed check so that wm_keydown/wm_char is not locked by dinput
+            // THANK YOU ERMACCER!!!
+            mem::write<uint8_t>(0x5B462A + 1, DISCL_NONEXCLUSIVE);
+            mem::write<uint8_t>(0x5B463B + 1, DISCL_NONEXCLUSIVE);
+        }
+
+        return true;
+    }
+};
+
+struct IBaseDebugOptions : IInterface
+{
+public:
+    virtual uint32_t GetNumberDebugOptions(void) const = 0;
+    virtual char * GetDebugOptionName(uint32_t) const = 0;
+    virtual int GetDebugOptionMin(uint32_t) const = 0;
+    virtual int GetDebugOptionMax(uint32_t) const = 0;
+    virtual int GetDebugOptionValue(uint32_t) const = 0;
+    virtual void SetDebugOptionValue(uint32_t, int) = 0;
+};
+
+struct IDrawToViewport : IInterface
+{
+    virtual void Draw(struct IViewport *) = 0;
+};
+
+struct IRenderer : virtual IBaseDebugOptions
+{
+};
+
+using Renderer = hamster::SingletonVar<hamster::ESingletonType::Renderer, IRenderer>;
+
+intptr_t cbSetDrawInterface;
+
+class CustomViewportDrawInterface : public IDrawToViewport
+{
+    IDrawToViewport *m_TheDrawInterface;
+public:
+    void Draw(struct IViewport *viewport) override
+    {
+        // currently broken...
+        m_TheDrawInterface->Draw(viewport);
+
+        // now draw the framework
+        //IDrawToViewport *pFramework = hamster::SingletonVar<hamster::ESingletonType::Framework, IDrawToViewport>::Get();
+        //
+        //pFramework->Draw(viewport);
+    }
+
+    void SetDrawInterface(IDrawToViewport *drawInterface)
+    {
+        m_TheDrawInterface = drawInterface;
+    }
+};
+
+CustomViewportDrawInterface g_CustomDrawInterface;
+
+class PCViewportHandler
+{
+protected:
+    static fiero::Field<0x440, IDrawToViewport *> _DrawInterface;
+
+public:
+    void SetDrawInterface(IDrawToViewport *drawInterface)
+    {
+        _DrawInterface.set(this, drawInterface);
+
+        //if (drawInterface != nullptr)
+        //{
+        //    g_CustomDrawInterface.SetDrawInterface(drawInterface);
+        //    _DrawInterface.set(this, &g_CustomDrawInterface);
+        //}
+        //else
+        //{
+        //    g_CustomDrawInterface.SetDrawInterface(nullptr);
+        //    _DrawInterface.set(this, nullptr);
+        //}
+    }
+
+    static bool Install()
+    {
+        if (gameversion != __DRIV3R_V100) {
+            HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS();
+            return false;
+        }
+
+        InstallCallback("CPCViewport::SetDrawInterface", "Draw debug stuff", &SetDrawInterface, {
+            cbHook<JMP>(0x5A55B0), // override original function entirely
+        });
+
+        return true;
+    }
+};
+
+typedef int EMenu;
+
+class CMenuManager : IInterface, virtual ITask
+{
+public:
+    virtual void Step (EMenu) THUNK;
+    virtual void LoadMenu(char const *, EMenu) THUNK;
+    virtual void UnLoadMenu(EMenu) THUNK;
+    virtual void ChangeMenuLanguage(void) THUNK;
+    virtual void ActivateMenu(EMenu) THUNK;
+    virtual void DeActivateMenu(EMenu) THUNK;
+    virtual bool IsLoaded(void) THUNK;
+    virtual EMenu GetActiveMenuID(void) THUNK;
+    virtual void SetScreen(EMenu, const char *) THUNK;
+    virtual const char * GetScreenTag(EMenu) THUNK;
+    virtual void DropBack(EMenu) THUNK;
+    virtual void AddScreen(EMenu, const char *) THUNK;
+    virtual void SetActiveButton(EMenu, unsigned int) THUNK;
+    virtual int GetScreenStackDepth(EMenu) THUNK;
+    virtual unsigned int GetActiveButton(EMenu) THUNK;
+};
+
+using MenuManager = hamster::SingletonVar<hamster::ESingletonType::MenuManager, CMenuManager>;
+
+struct CGameMenuLink : IInterface
+{
+public:
+    virtual void Initialise(void) THUNK;
+    virtual struct SMenuTextPair * GetMenuText(const char *) THUNK;
+    virtual enum EMenuState GetMenuState(enum EMenuState, const char *) THUNK;
+    virtual int * GetMenuValues(const char *) THUNK;
+    virtual void SetState(enum EMenuState) THUNK;
+    virtual void SetText(const unsigned short *) THUNK;
+    virtual void SetDebugText(const char *) THUNK;
+    virtual void SetValue(int, int, int, int) THUNK;
+    virtual void SetValue(int, int, int) THUNK;
+    virtual void SetValue(int, int) THUNK;
+    virtual void SetValue(int) THUNK;
+};
+
+using MenuLink = hamster::SingletonVar<hamster::ESingletonType::MenuLink, CGameMenuLink>;
+
+struct PCRenderer {
+
+    static fiero::Field<0x21BA0, float> mood_CarSpecularIntensity;
+    static fiero::Field<0x21BAC, float> mood_HyperLowNearCull;
+    static fiero::Field<0x21BB0, float> mood_HyperLowFarCull;
+
+    static PCRenderer * Get()
+    {
+        return (PCRenderer *)addressof(0x8B8A48, NULL);
+    }
+
+};
+
+class CSfxDaytimeThing
+{
+protected:
+    static fiero::Field<0x11, bool> _bInited;
+public:
+    bool GetInited() const
+    {
+        return _bInited.get(this);
+    }
+
+    void SetInited(bool value)
+    {
+        _bInited.set(this, value);
+    }
+};
+
+class CSFXServer
+{
+protected:
+    static fiero::Field<0x34, CSfxDaytimeThing *> _DaytimeThing;
+public:
+
+    CSfxDaytimeThing * GetDaytimeThing() const
+    {
+        return _DaytimeThing.get(this);
+    }
+};
+
+class CISFXServer : IInterface
+{
+public:
+    CSFXServer * m_pI;
+
+    CSFXServer * GetInterface() const
+    {
+        return m_pI;
+    }
+};
+
+
+
+void (__stdcall *_GetHyperLowParams)(D3DXVECTOR4 &params, float hyperLowNearCull, float hyperLowFarCull, float);
+
+float g_HyperLowNearCull = 187.5f;
+float g_HyperLowFarCull = 212.5f;
+
+void __stdcall GetHyperLowParams(D3DXVECTOR4 &params, float, float, float)
+{
+    return _GetHyperLowParams(params, g_HyperLowNearCull, g_HyperLowFarCull, 1.0f);
+}
+
+init_handler HyperlowHandler("HyperlowHandler", []() {
+    if (gameversion == __DRIV3R_V100)
+    {
+        InstallCallback("GetHyperLowParams", GetHyperLowParams, cbHook<CALL>(0x5e9b6f), reinterpret_cast<intptr_t *>(&_GetHyperLowParams));
+    }
+
+    return true;
+});
+
+struct SDebugOption
+{
+    const char *szName;
+    int iValue;
+    int nMin;
+    int nMax;
+};
+
+const char g_EnvironmentLerpFactor[] = "Environment Lerp factor";
+const char g_ProjectedHeadLightFOV[] = "Projected head light FOV";
+const char g_LowestRenderBin[] = "Lowest Render Bin";
+const char g_HighestRenderBin[] = "Highest Render Bin";
+
+const char g_UseOccluders[] = "Use Occluders";
+const char g_UseAntiOccluders[] = "Use Anti Occluders";
+const char g_ExtendOccluders[] = "Extend Occluders";
+
+const char g_MaxPedestrians[] = "Max pedestrians";
+
+const char g_AIForceBelowValues[] = "AI Force Below Overrides";
+const char g_AIMaxVehicles[] = "AI Max Vehicles";
+const char g_AIMaxParkedVehicles[] = "AI Max Parked Vehicles";
+const char g_AIMaxParkedCar[] = "AI Max Parked Car";
+const char g_AIMaxParkedBus[] = "AI Max Parked Bus";
+const char g_AIMaxParkedBoat[] = "AI Max Parked Boat";
+const char g_AIMaxParkedBike[] = "AI Max Parked Bike";
+const char g_AIMaxParkedLorry[] = "AI Max Parked Lorry";
+const char g_AIMaxParkedTaxi[] = "AI Max Parked Taxi";
+const char g_AIMaxParkedGoKart[] = "AI Max Parked GoKart";
+
+class DebugOptions_Impl : virtual IBaseDebugOptions, virtual IDrawToViewport, virtual IUserCommand {
+private:
+    static SDebugOption m_Options[];
+
+    IDrawToViewport *m_piViewport__UNUSED;
+    MAv4 m_Camera;
+    IBaseDebugOptions *m_piDebugInterface;
+
+    uint32_t m_debugOffset;
+    uint32_t m_debugOption;
+public:
+    void Initialize()
+    {
+        m_piDebugInterface = this;
+        pUserCmdProxy->RegisterCommand(this);
+    }
+
+    void Release()
+    {
+        m_piDebugInterface = nullptr;
+        pUserCmdProxy->UnregisterCommand(this);
+    }
+
+    static int GetDebugOptionIndex(const char *message)
+    {
+        if (!_stricmp(message, "DebugOption0")) return 0;
+        if (!_stricmp(message, "DebugOption1")) return 1;
+        if (!_stricmp(message, "DebugOption2")) return 2;
+        if (!_stricmp(message, "DebugOption3")) return 3;
+        if (!_stricmp(message, "DebugOption4")) return 4;
+        if (!_stricmp(message, "DebugOption5")) return 5;
+        if (!_stricmp(message, "DebugOption6")) return 6;
+        if (!_stricmp(message, "DebugOption7")) return 7;
+        if (!_stricmp(message, "DebugOption8")) return 8;
+        if (!_stricmp(message, "DebugOption9")) return 9;
+
+        return -1;
+    }
+
+    static int GetVehicleManagerDebugOptionType(const char *option_name)
+    {
+        int type = -1;
+
+        if (!_stricmp(option_name, g_AIMaxVehicles))
+        {
+            type = 0;
+        }
+        else if (!_stricmp(option_name, g_AIMaxParkedVehicles))
+        {
+            type = 1;
+        }
+        else if (!_stricmp(option_name, g_AIMaxParkedCar))
+        {
+            type = 2;
+        }
+        else if (!_stricmp(option_name, g_AIMaxParkedBus))
+        {
+            type = 3;
+        }
+        else if (!_stricmp(option_name, g_AIMaxParkedBoat))
+        {
+            type = 4;
+        }
+        else if (!_stricmp(option_name, g_AIMaxParkedBike))
+        {
+            type = 5;
+        }
+        else if (!_stricmp(option_name, g_AIMaxParkedLorry))
+        {
+            type = 6;
+        }
+        else if (!_stricmp(option_name, g_AIMaxParkedTaxi))
+        {
+            type = 7;
+        }
+        else if (!_stricmp(option_name, g_AIMaxParkedGoKart))
+        {
+            type = 8;
+        }
+
+        return type;
+    }
+
+    void OnInterfaceChanged()
+    {
+        m_debugOffset = 0;
+        m_debugOption = 0;
+
+        EMenu activeMenu = MenuManager::Get()->GetActiveMenuID();
+        unsigned int activeButton = MenuManager::Get()->GetActiveButton(activeMenu);
+
+        m_debugOption = activeButton;
+
+        for (uint32_t option_num = 0; option_num < m_piDebugInterface->GetNumberDebugOptions(); option_num++)
+        {
+            char *option_name = m_piDebugInterface->GetDebugOptionName(option_num);
+
+#if USE_CAR_SPECULAR_INTENSITY
+            if (!_stricmp(option_name, g_EnvironmentLerpFactor))
+            {
+                float intensity = PCRenderer::mood_CarSpecularIntensity.get(PCRenderer::Get());
+
+                m_piDebugInterface->SetDebugOptionValue(option_num, (int)(intensity * m_piDebugInterface->GetDebugOptionMax(option_num)));
+            }
+            else
+#endif
+            if (!_stricmp(option_name, g_ProjectedHeadLightFOV))
+            {
+                float headlight_fov = mem::read<float>(0x7E261C);
+
+                m_piDebugInterface->SetDebugOptionValue(option_num, (int)headlight_fov);
+            }
+            else if (!_stricmp(option_name, g_LowestRenderBin))
+            {
+                m_piDebugInterface->SetDebugOptionValue(option_num, mem::read<short>(0x8E9744));
+            }
+            else if (!_stricmp(option_name, g_HighestRenderBin))
+            {
+                m_piDebugInterface->SetDebugOptionValue(option_num, mem::read<short>(0x7E2624));
+            }
+            else if (!_stricmp(option_name, g_UseOccluders))
+            {
+                m_piDebugInterface->SetDebugOptionValue(option_num, mem::read<byte>(0x7A23A9));
+            }
+            else if (!_stricmp(option_name, g_UseAntiOccluders))
+            {
+                m_piDebugInterface->SetDebugOptionValue(option_num, mem::read<byte>(0x7A23A2));
+            }
+            else if (!_stricmp(option_name, g_ExtendOccluders))
+            {
+                m_piDebugInterface->SetDebugOptionValue(option_num, mem::read<byte>(0x7A23A0));
+            }
+            //else if (!_stricmp(option_name, "SFX daytime thing"))
+            //{
+            //    CISFXServer *ISFXServer = hamster::SingletonVar<hamster::ESingletonType::SFXServer, CISFXServer>::Get();
+            //    CSfxDaytimeThing *DaytimeThing = ISFXServer->GetInterface()->GetDaytimeThing();
+            //    
+            //    if (DaytimeThing)
+            //        m_piDebugInterface->SetDebugOptionValue(option_num, DaytimeThing->GetInited());
+            //    else
+            //        m_piDebugInterface->SetDebugOptionValue(option_num, 0);
+            //}
+            else if (!_stricmp(option_name, g_MaxPedestrians))
+            {
+                m_piDebugInterface->SetDebugOptionValue(option_num, mem::read<int>(0x79DFF8));
+            }
+            else if (!_stricmp(option_name, g_AIForceBelowValues))
+            {
+                m_piDebugInterface->SetDebugOptionValue(option_num, AIManagerClass::Get()->sm_bEnableOverrides ? 1 : 0);
+            }
+            else
+            {
+                int type = GetVehicleManagerDebugOptionType(option_name);
+
+                if (type != -1)
+                    m_piDebugInterface->SetDebugOptionValue(option_num, AIManagerClass::Get()->GetMaxNumberOfAIVehicles(type));
+            }
+        }
+    }
+
+    bool OnOptionUpdated(char *option_name, int option_min, int option_max, int option_val)
+    {
+#if USE_CAR_SPECULAR_INTENSITY
+        if (!_stricmp(option_name, g_EnvironmentLerpFactor))
+        {
+            float old_intensity = PCRenderer::mood_CarSpecularIntensity.get(PCRenderer::Get());
+            float new_intensity = (float)option_val / option_max;
+
+            PCRenderer::mood_CarSpecularIntensity.set(PCRenderer::Get(), new_intensity);
+            LogFile::Format("Changed car specular intensity from %.2f to %.2f\n", old_intensity, new_intensity);
+        }
+        else
+#endif
+        if (!_stricmp(option_name, g_ProjectedHeadLightFOV))
+        {
+            mem::write(0x7E261C, (float)option_val);
+        }
+        else if (!_stricmp(option_name, g_LowestRenderBin))
+        {
+            mem::write(0x8E9744, (short)option_val);
+        }
+        else if (!_stricmp(option_name, g_HighestRenderBin))
+        {
+            mem::write(0x7E2624, (short)option_val);
+        }
+        else if (!_stricmp(option_name, g_UseOccluders))
+        {
+            mem::write(0x7A23A9, (byte)option_val);
+        }
+        else if (!_stricmp(option_name, g_UseAntiOccluders))
+        {
+            mem::write(0x7A23A2, (byte)option_val);
+        }
+        else if (!_stricmp(option_name, g_ExtendOccluders))
+        {
+            mem::write(0x7A23A0, (byte)option_val);
+        }
+        //else if (!_stricmp(option_name, "SFX daytime thing"))
+        //{
+        //    CISFXServer *ISFXServer = hamster::SingletonVar<hamster::ESingletonType::SFXServer, CISFXServer>::Get();
+        //    CSfxDaytimeThing *DaytimeThing = ISFXServer->GetInterface()->GetDaytimeThing();
+        //
+        //    if (!DaytimeThing)
+        //        return false;
+        //
+        //    DaytimeThing->SetInited(option_val != 0);
+        //}
+        else if (!_stricmp(option_name, g_MaxPedestrians))
+        {
+            mem::write(0x79DFF8, option_val);
+        }
+        else if (!_stricmp(option_name, g_AIForceBelowValues))
+        {
+            AIManagerClass::Get()->sm_bEnableOverrides = (option_val != 0);
+        }
+        else
+        {
+            int type = GetVehicleManagerDebugOptionType(option_name);
+
+            if (type != -1)
+                AIManagerClass::Get()->SetMaxNumberOfAIVehicles(type, option_val);
+        }
+
+        return true;
+    }
+
+    void ProcessCommand(const char *message, const char *) override
+    {
+        uint32_t num_options = m_piDebugInterface->GetNumberDebugOptions();
+
+        if (num_options == 0)
+            return;
+
+        int option_idx = GetDebugOptionIndex(message);
+
+        if (option_idx != -1)
+        {
+            uint32_t option_num = m_debugOffset + option_idx;
+
+            if (option_num < num_options)
+            {
+                MenuLink::Get()->SetValue(m_piDebugInterface->GetDebugOptionValue(option_num));
+                MenuLink::Get()->SetDebugText(m_piDebugInterface->GetDebugOptionName(option_num));
+            }
+        }
+
+        if (!_stricmp(message, "DebugOption_Renderer"))
+        {
+            intptr_t renderer = hamster::GetSingletonObject(hamster::ESingletonType::Renderer);
+
+            m_piDebugInterface = (IBaseDebugOptions*)(renderer + 4);
+            OnInterfaceChanged();
+        }
+        else if (!_stricmp(message, "DebugOptions_Game"))
+        {
+            m_piDebugInterface = this;
+            OnInterfaceChanged();
+        }
+
+        if (!_stricmp(message, "DebugOption_Next"))
+        {
+            if (m_debugOption < 9)
+                ++m_debugOption;
+            else
+            {
+                m_debugOffset += 10;
+                m_debugOption = 0;
+                if ( m_debugOffset > (num_options - 1) )
+                    m_debugOffset = 0;
+            }
+        }
+        else if ( !_stricmp(message, "DebugOption_Prev") )
+        {
+            if ( m_debugOption > 0 )
+                --m_debugOption;
+            else
+            {
+                m_debugOffset -= 10;
+                m_debugOption = 9;
+                if ( m_debugOffset < 0 )
+                    m_debugOffset = 10 * ((num_options - 1) / 10);
+            }
+        }
+        else
+        {
+            bool move_up = false;
+            bool move_down = false;
+
+            if (!_stricmp(message, "DO0Up"))
+            {
+                move_up = true;
+            }
+            else if (!_stricmp(message, "DO0Down"))
+            {
+                move_down = true;
+            }
+
+            if (move_up || move_down)
+            {
+                if (m_debugOption < num_options)
+                {
+                    uint32_t option_num = m_debugOption + m_debugOffset;
+
+                    int option_max = m_piDebugInterface->GetDebugOptionMax(option_num);
+                    int option_min = m_piDebugInterface->GetDebugOptionMin(option_num);
+                    int option_val = m_piDebugInterface->GetDebugOptionValue(option_num);
+
+                    char *option_name = m_piDebugInterface->GetDebugOptionName(option_num);
+
+                    if (move_up)
+                    {
+                        if (++option_val > option_max)
+                            option_val = option_min;
+                    }
+                    else if (move_down)
+                    {
+                        if (--option_val < option_min)
+                            option_val = option_max;
+                    }
+
+                    if (OnOptionUpdated(option_name, option_min, option_max, option_val))
+                        m_piDebugInterface->SetDebugOptionValue(option_num, option_val);
+                }
+            }
+        }
+    }
+
+    void Step()
+    {
+        intptr_t renderer = hamster::GetSingletonObject(hamster::ESingletonType::Renderer);
+
+        IBaseDebugOptions *renderDebugOptions = (IBaseDebugOptions*)(renderer + 4);
+
+        if (!renderDebugOptions)
+            return;
+
+        PCRenderer *the_renderer = PCRenderer::Get();
+
+        if (!the_renderer)
+            return;
+
+        for (uint32_t option_num = 0; option_num < renderDebugOptions->GetNumberDebugOptions(); option_num++)
+        {
+            char *option_name = renderDebugOptions->GetDebugOptionName(option_num);
+
+            if (!_stricmp(option_name, "Hyperlow near cull"))
+                g_HyperLowNearCull = renderDebugOptions->GetDebugOptionValue(option_num) + PCRenderer::mood_HyperLowFarCull.get(the_renderer);
+            else if (!_stricmp(option_name, "Hyperlow far cull"))
+                g_HyperLowFarCull = renderDebugOptions->GetDebugOptionValue(option_num) + PCRenderer::mood_HyperLowFarCull.get(the_renderer);
+        }
+    }
+
+    //
+    // these do nothing for now
+    //
+
+    void Draw(struct IViewport *)  override             THUNK;
+
+    uint32_t GetNumberDebugOptions(void) const override;
+    char * GetDebugOptionName(uint32_t) const override;
+    int GetDebugOptionMin(uint32_t) const override;
+    int GetDebugOptionMax(uint32_t) const override;
+    int GetDebugOptionValue(uint32_t) const override;
+    void SetDebugOptionValue(uint32_t, int) override;
+};
+
+SDebugOption DebugOptions_Impl::m_Options[] = {
+    //{ "Show Overlays", 1, 1, 1 }, // can't change it yet :D
+    { g_UseOccluders, 1, 0, 1 },
+    { g_UseAntiOccluders, 1, 0, 1 },
+    { g_ExtendOccluders, 1, 0, 1 },
+    //{ "SFX daytime thing", 0, 0, 1 },
+    { "==================", 0,0,0 },
+    { g_AIForceBelowValues, 0, 0, 1 },
+    { g_MaxPedestrians, 8, 0, 16 },
+    { g_AIMaxVehicles, 0, 0, 64 },
+    { g_AIMaxParkedVehicles, 0, 0, 64 },
+    { g_AIMaxParkedCar, 0, 0, 64 },
+    { g_AIMaxParkedBus, 0, 0, 64 },
+    { g_AIMaxParkedBoat, 0, 0, 64 },
+    { g_AIMaxParkedBike, 0, 0, 64 },
+    { g_AIMaxParkedLorry, 0, 0, 64 },
+    { g_AIMaxParkedTaxi, 0, 0, 64 },
+    { g_AIMaxParkedGoKart, 0, 0, 64 },
+};
+
+inline uint32_t DebugOptions_Impl::GetNumberDebugOptions(void) const{ return sizeof(m_Options) / sizeof(SDebugOption); };
+
+char * DebugOptions_Impl::GetDebugOptionName(uint32_t idx) const    { return (idx < GetNumberDebugOptions()) ? m_Options[idx].szName : ""; };
+int DebugOptions_Impl::GetDebugOptionMin(uint32_t idx) const        { return (idx < GetNumberDebugOptions()) ? m_Options[idx].nMin : 0; };
+int DebugOptions_Impl::GetDebugOptionMax(uint32_t idx) const        { return (idx < GetNumberDebugOptions()) ? m_Options[idx].nMax : 0; };
+int DebugOptions_Impl::GetDebugOptionValue(uint32_t idx) const      { return (idx < GetNumberDebugOptions()) ? m_Options[idx].iValue : 0; };
+
+void DebugOptions_Impl::SetDebugOptionValue(uint32_t idx, int value) {
+    if (idx < GetNumberDebugOptions())
+        m_Options[idx].iValue = value;
+};
+
+class C_DebugOptions {
+private:
+    static DebugOptions_Impl sm_DebugOptions;
+public:
+    static void Initialize() { sm_DebugOptions.Initialize(); }
+    static void Step() { sm_DebugOptions.Step(); }
+    static void Release() { sm_DebugOptions.Release(); }
+};
+
+DebugOptions_Impl C_DebugOptions::sm_DebugOptions {};
+
+class MainStateHandler {
+protected:
+    void Step()
+    {
+        if (!g_bGUIFocus)
+        {
+            // update the gamepad first
+            reinterpret_cast<MemberCall<bool, void>>(0x5B5D20)((void*)hamster::GetSingletonObject(hamster::ESingletonType::Gamepad));
+
+            // now update the debug options
+            C_DebugOptions::Step();
+        }
+
+        reinterpret_cast<MemberCall<void, void>>(0x5887D0)(this);
+    }
+
+    void OnEnterState()
+    {
+        reinterpret_cast<MemberCall<void, void>>(0x588830)(this);
+
+        C_DebugOptions::Initialize();
+    }
+
+    void OnLeaveState()
+    {
+        C_DebugOptions::Release();
+
+        reinterpret_cast<MemberCall<void, void>>(0x588A80)(this);
+    }
+public:
+    static bool Install() {
+        if (gameversion != __DRIV3R_V100) {
+            HANDLER_CANNOT_BE_IMPLEMENTED_BECAUSE_PATCH_2_SUCKS();
+            return false;
+        }
+        
+        InstallVTableHook("CState_Main::Step", &Step, { 0x6FA334 });
+        InstallVTableHook("CState_Main::OnEnterState", &OnEnterState, { 0x6FA344 });
+        InstallVTableHook("CState_Main::OnLeaveState", &OnLeaveState, { 0x6FA348 });
+
+        InstallPatch("CState_Main::Step - patch out the gamepad update call", {
+            0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+            0x90, 0x90, 0x90, 0x90, 0x90,
+        }, { 0x5887D3 });
+
+        InstallPatch("Fix highest render bin", { 100 }, { 0x5D62FE + 1 });
 
         return true;
     }
@@ -2136,9 +2976,32 @@ protected:
         // therefore, we need an index of 13
         mem::write<uint8_t>(0x5EC600 + 33, 13);
 
+#if defined(HOOK_EXE)
         // do not write dsound log in game Directory, as it might be read only
         mem::write<uint8_t>(0x5CA800, 0xE9);
         mem::write<uintptr_t>(0x5CA800 + 1, (intptr_t)&DSLog_Imp - 0x5CA800 - 5);
+#endif
+#if USE_CAR_SPECULAR_INTENSITY
+        InstallPatch("Use Car Specular Intensity value", {
+            /* assembled by hand in IDA ;) */
+            0x83,0xFE,0x06,                		// cmp     esi, 6
+            0x74,0x1B,                   		// jz      short loc_5EC5C0
+            0x83,0xFE,0x07,                		// cmp     esi, 7
+            0x74,0x16,                  		// jz      short loc_5EC5C0
+            0x8D,0x74,0x24,0x1C,             	// lea     esi, [esp+0E4h+mood]
+            0x8D,0x7C,0x24,0x0C,             	// lea     edi, [esp+0E4h+lightColor]
+            0x6A,0x03,                  		// push    3
+            0x59,                      			// pop     ecx
+            0xF3,0xA5,                   		// rep movsd
+            0x8B,0x8C,0x24,0xB0,0x00,0x00,0x00, // mov     ecx, [esp+0E4h+mood.CarSpecularIntensity]
+            0xEB,0x06,                   		// jmp     short loc_5EC5C6
+            // loc_5EC5C0:
+            0x68,0x33,0x33,0xB3,0x3E,          	// push    0.34999999
+            0x59,                      			// pop     ecx
+            // loc_5EC5C6:
+            0x89,0x4C,0x24,0x18,             	// mov     [esp+0E4h+lightColor.w], ecx
+        }, { 0x5EC5A0 });
+#endif
     }
 
     static void Install_V120() {
@@ -2174,13 +3037,6 @@ protected:
 
         // turn off the high beams :P
         mem::write(addressof(0x7E261C, 0x7E5F00), 90.0f);
-
-        // fixes shiny wheels/interiors
-        // ...but in patch 2, EVERYTHING IS SHINY AT NIGHT!?
-        mem::write<uint8_t>(addressof(0x5EC600 + 28, 0x5E1058 + 28), 1);
-
-        // turn off the high beams :P
-        mem::write(addressof(0x7E261C, 0x7E5F00), 90.0f);
     }
 public:
     static bool Install() {
@@ -2204,7 +3060,7 @@ public:
 
 static intptr_t _WinMainCallback;
 
-class HookSystemHandler
+class HookSystemFramework
 {
     static void InstallHandlers() {
         LogFile::WriteLine("Installing handlers...");
@@ -2214,7 +3070,6 @@ class HookSystemHandler
         */
 
         InstallHandler<FrameworkHandler>("Main framework");
-        InstallHandler<PatchHandler>("Patching framework");
         InstallHandler<WindowedModeHandler>("Windowed mode");
 
         /*
@@ -2225,9 +3080,15 @@ class HookSystemHandler
         InstallHandler<d3dStateManager>("d3dStateManager");
         InstallHandler<effectManagerHandler>("effectManager");
         InstallHandler<DrawListHandler>("DrawList");
+
+#if FILESYS_HOOK
         InstallHandler<CFileSystemPC>("Filesystem");
+#endif
 
         InstallHandler<HamsterViewportHandler>("HamsterViewport");
+
+        InstallHandler<MainStateHandler>("CState_Main");
+        InstallHandler<PCViewportHandler>("CPCViewport");
 
         init_base::RunAll();
     }
@@ -2235,37 +3096,28 @@ class HookSystemHandler
     static void InstallPatches() {
         LogFile::WriteLine("Installing patches...");
 
-        switch (gameversion)
-        {
-        case __DRIV3R_V100:
-        {
-
-        } break;
-        case __DRIV3R_V120:
-        {
-
-        } break;
-        }
+        InstallHandler<PatchHandler>("Patching framework");
     }
 protected:
-    // this fucking game, man....
-    static int __stdcall Initialize(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-        LogFile::WriteLine("Initializing the hook framework...");
-
-        // initialize game module info
-        if (!fxModule::Initialize(mymodule, hInstance))
-            LogFile::WriteLine("Couldn't initialize the game's module info!");
-
+    static int __stdcall Run(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
         InstallPatches();
         InstallHandlers();
 
-        LogFile::WriteLine("Returning control to the game...");
+        // run the game
         return reinterpret_cast<decltype(WinMain)*>(_WinMainCallback)(hInstance, hPrevInstance, lpCmdLine, nShowCmd);
     }
 public:
+    static void Shutdown() {
+        LogFile::WriteLine("Hook shutdown request received.");
+    }
+
     static bool Install() {
-        InstallCallback("Allows the hook to initialize before the game runs.",
-            &Initialize, addressof<CALL>(0x5F053C, 0x5E5B04), &_WinMainCallback);
+        LogFile::WriteLine("Installing framework...");
+
+        InstallCallback("WinMain", "Allows the hook to initialize before the game runs.",
+            &Run, addressof<CALL>(0x5F053C, 0x5E5B04), &_WinMainCallback);
+
+        atexit(Shutdown);
 
         /*
             IMPORTANT:
@@ -2285,8 +3137,10 @@ void Initialize(RSDSEntry& gameInfo) {
 
     // initialize game manager
     pDriv3r = new CDriv3r(gameversion);
+    pDriv3r->Initialize();
 
-    HookSystemHandler::Install();
+    // install the framework
+    HookSystemFramework::Install();
 }
 
 #ifdef USE_GUI
@@ -2318,7 +3172,7 @@ void gui::Initialize(HWND hwnd, IDirect3DDevice9 *device)
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
 
-    ImGui::SetAllocatorFunctions(HungryAllocate, HungryFree);
+    //ImGui::SetAllocatorFunctions(HungryAllocate, HungryFree);
 
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;

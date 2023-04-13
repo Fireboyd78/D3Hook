@@ -159,6 +159,7 @@ private:
 	HKEY key = nullptr;
 };
 
+#if defined(HOOK_EXE)
 std::wstring selectGamePath()
 {
 	wchar_t gameDir[MAX_PATH]{};
@@ -237,3 +238,4 @@ std::wstring makeToolPath(const std::wstring& rel_to)
 	
 	return newPath;
 }
+#endif
