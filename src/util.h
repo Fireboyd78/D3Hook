@@ -269,6 +269,183 @@ namespace variadic
     constexpr bool true_for_any<B, BB...> = B || true_for_any<BB...>;
 }
 
+template <size_t _size = 0>
+struct string_buf {
+private:
+    char buffer[_size] = { NULL };
+public:
+    constexpr string_buf() {}
+
+    constexpr string_buf(char (&buf)[_size])
+        : buffer(buf) {}
+
+    template <size_t size>
+    constexpr string_buf(char (&buf)[size])
+        : buffer(buf) {
+        static_assert(size <= _size, "not enough space for string");
+    }
+
+    constexpr string_buf(const char *str) {
+        set(str);
+    }
+
+    template <typename ...TArgs>
+    constexpr string_buf(const char *fmt, TArgs ...args) {
+        format(fmt, args...);
+    }
+
+    constexpr char * operator &() {
+        return &buffer;
+    }
+
+    constexpr char * operator[](int index) {
+        return &buffer[index];
+    }
+
+    constexpr operator char *() {
+        return buffer;
+    }
+
+    constexpr operator const char *() {
+        return buffer;
+    }
+
+    constexpr size_t size() const {
+        return _size;
+    }
+
+    constexpr bool is_empty() {
+        if (buffer[0] == NULL)
+            return true;
+
+        return false;
+    }
+
+    inline void clear() {
+        buffer[0] = NULL;
+    }
+
+    inline void reset() {
+        // reset the entire buffer
+        memset(buffer, NULL, _size);
+    }
+
+    inline const char *get() {
+        return buffer;
+    }
+
+    inline void set(const char *str) {
+        strcpy_s(buffer, str);
+    }
+
+    template <typename ...TArgs>
+    inline size_t format(const char *fmt, TArgs ...args) {
+        return sprintf_s(buffer, fmt, args...);
+    }
+
+    inline void append(char c) {
+        size_t idx = strlen(buffer);
+
+        if (idx < _size)
+            buffer[idx] = c;
+    }
+
+    inline void append(const char *str) {
+        size_t idx = strlen(buffer);
+        size_t num = (_size - idx);
+
+        strncpy(&buffer[idx], str, min(num, _size));
+
+        if (num >= _size)
+            buffer[_size - 1] = '\0';
+    }
+
+    template <typename ...TArgs>
+    inline void append(const char *fmt, TArgs ...args) {
+        size_t idx = strlen(buffer);
+        size_t num = (_size - idx);
+
+        snprintf(&buffer[idx], min(num, _size), fmt, args...);
+
+        if (num >= _size)
+            buffer[_size - 1] = '\0';
+    }
+};
+
+struct stopwatch {
+public:
+    unsigned int startTime;
+    unsigned int endTime;
+
+    static float ticksToSeconds;
+    static float ticksToMilliseconds;
+
+    static unsigned int ticks() {
+        LARGE_INTEGER perf;
+        QueryPerformanceCounter(&perf);
+        return perf.LowPart;
+    }
+
+    stopwatch() {
+        if (ticksToSeconds == 0.0f) {
+            LARGE_INTEGER freq;
+            QueryPerformanceFrequency(&freq);
+            ticksToSeconds = (1.0f / freq.LowPart);
+            ticksToMilliseconds = (ticksToSeconds * 1000.0f);
+        }
+        reset();
+    }
+
+    inline unsigned int elapsedTicks() {
+        int curTime = (endTime != 0) ? endTime : ticks();
+
+        return (curTime - startTime);
+    }
+
+    inline float elapsedSeconds() {
+        return elapsedTicks() * ticksToSeconds;
+    }
+
+    inline float elapsedMilliseconds() {
+        return elapsedTicks() * ticksToMilliseconds;
+    }
+
+    void reset() {
+        startTime = 0;
+        endTime = 0;
+    }
+
+    void start() {
+        if (startTime == 0)
+            startTime = ticks();
+    }
+
+    void restart() {
+        startTime = ticks();
+        endTime = 0;
+    }
+
+    void stop() {
+        if (endTime == 0)
+            endTime = ticks();
+    }
+};
+
+struct scoped_vtable {
+private:
+    const intptr_t obj;
+    const intptr_t vtbl;
+public:
+    template <typename TClass>
+    inline scoped_vtable(const TClass *obj) noexcept :
+        obj(reinterpret_cast<const intptr_t>(obj)),
+        vtbl(*reinterpret_cast<const intptr_t *>(obj)) { }
+
+    inline ~scoped_vtable() noexcept {
+        *reinterpret_cast<intptr_t *>(obj) = vtbl;
+    }
+};
+
 //
 // CODEVIEW data
 //
