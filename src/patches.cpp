@@ -35,25 +35,23 @@ fxModule gamemodule;
 fxModule mymodule;
 
 #ifdef USE_GUI
-static bool g_bGUIWaiting = false;
-
-static bool g_bGUIReady = false;
-static bool g_bGUIFocus = false;
+static bool g_bGUINeedInit = false;
 
 static void DrawGUI() {
 #if DRAW_GUI
-    if (g_bGUIWaiting) {
-        LogFile::WriteLine("Initializing ImGui...");
-        gui::Initialize(hamster::GetMainWindow(), pD3DDevice);
-        g_bGUIReady = true;
-        g_bGUIWaiting = false;
+    if (g_bGUINeedInit)
+    {
+        LogFile::Printf(1, "Initializing ImGui...");
+        if (gui::Initialize(hamster::GetMainWindow(), pD3DDevice))
+            LogFile::Printf(1, "** Success!");
+        else
+            LogFile::Printf(2, "** FAILED!");
+        g_bGUINeedInit = false;
     }
-
-    if (g_bGUIFocus) {
-        gui::BeginFrame();
-        gui::Update();
-        gui::Render();
-        gui::EndFrame();
+    else
+    {
+        if (gui::IsActive())
+            gui::Draw();
     }
 #endif
 }
@@ -267,7 +265,7 @@ bool HandleKeyPress(uint8_t vKey)
 #ifdef USE_GUI
     case VK_F3:
     {
-        g_bGUIFocus = !g_bGUIFocus;
+        gui::Toggle();
         return true;
     }
 #endif
@@ -1672,7 +1670,10 @@ public:
 #if DRAW_GUI
         if (result == D3DERR_DEVICELOST) {
             if (pD3DDevice->TestCooperativeLevel() == D3DERR_DEVICENOTRESET)
-                gui::Reset();
+            {
+                if (gui::IsReady())
+                    gui::Reset();
+            }
         }
 #endif
         return result;
@@ -1974,7 +1975,7 @@ public:
 #ifdef USE_GUI
         // if we subclassed the window and got the device
         if (canUseGui)
-            g_bGUIWaiting = true;
+            g_bGUINeedInit = true;
 #endif
 
         LogFile::AppendLine();
@@ -2072,35 +2073,14 @@ static BOOL WindowUpdated(HWND hWnd, bool refocus) {
 LRESULT APIENTRY WndProcNew(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 #ifdef USE_GUI
-    if (g_bGUIReady && g_bGUIFocus)
+    if (gui::IsReady())
     {
-        if (gui::runtime::WndProcHandler(hWnd, uMsg, wParam, lParam))
+        if (gui::WndProcHandler(hWnd, uMsg, wParam, lParam))
             return 1;
     }
 #endif
+
     switch (uMsg) {
-#ifdef USE_GUI
-    case WM_DESTROY:
-        if (g_bGUIReady) {
-            gui::Shutdown();
-            g_bGUIReady = false;
-        }
-        break;
-#endif
-#ifdef USE_GUI
-    case WM_SIZE:
-        if (g_bGUIReady)
-            gui::Reset();
-        break;
-    
-    case WM_SYSCOMMAND:
-        if (g_bGUIReady && g_bGUIFocus)
-        {
-            if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
-                return 0;
-        }
-        break;
-#endif
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
     case WM_KEYUP:
@@ -2914,7 +2894,7 @@ class MainStateHandler {
 protected:
     void Step()
     {
-        if (!g_bGUIFocus)
+        if (!gui::IsActive())
         {
             // update the gamepad first
             reinterpret_cast<MemberCall<bool, void>>(0x5B5D20)((void*)hamster::GetSingletonObject(hamster::ESingletonType::Gamepad));
@@ -3148,54 +3128,32 @@ void Initialize(RSDSEntry& gameInfo) {
 // gui user-functions
 //
 
-static char g_MegaBuffer[4096 * 4096 * 64] = { NULL };
-static size_t g_MegaBufferOffset = 0;
-
-void *HungryAllocate(size_t size, void *user_data) {
-    if (g_MegaBufferOffset >= sizeof(g_MegaBuffer))
-        return nullptr;
-
-    void *buffer = (void *)g_MegaBuffer[g_MegaBufferOffset];
-    g_MegaBufferOffset += size;
-
-    ZeroMemory(buffer, size);
-
-    return buffer;
-}
-
-void HungryFree(void *ptr, void *user_data) {
-    // LOL
-}
-
-void gui::Initialize(HWND hwnd, IDirect3DDevice9 *device)
+// setup for initialization
+bool gui::SetupConfig(ImGuiIO &io)
 {
-    // Setup Dear ImGui context
-    IMGUI_CHECKVERSION();
-
-    //ImGui::SetAllocatorFunctions(HungryAllocate, HungryFree);
-
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
 
     // Setup Dear ImGui style
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsClassic();
 
-    // Setup Platform/Renderer bindings
-    gui::runtime::Initialize(hwnd);
-    gui::device::Initialize(device);
+    return true;
 }
 
-void gui::Shutdown()
+// just after successful initialization
+void gui::OnReady(ImGuiIO &io)
 {
-    gui::device::Shutdown();
-    gui::runtime::Shutdown();
-
-    ImGui::DestroyContext();
+    atexit(gui::Shutdown);
 }
 
+// just before everything gets destroyed
+void gui::OnShutdown()
+{
+
+}
+
+// update the gui
 void gui::Update()
 {
     // Our state
@@ -3206,14 +3164,20 @@ void gui::Update()
     if (show_demo_window)
         ImGui::ShowDemoWindow(&show_demo_window);
 
-    // 2. Show a simple window that we create ourselves. We use a Begin/End pair to created a named window.
+    // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
     {
+        ImGuiIO &io = ImGui::GetIO();
+
         static float f = 0.0f;
         static int counter = 0;
 
         ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
 
+        if (ImGui::Button("Kill me!"))
+            ExitProcess(0);
+
         ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
+        
         ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
         ImGui::Checkbox("Another Window", &show_another_window);
 
@@ -3224,7 +3188,7 @@ void gui::Update()
         ImGui::SameLine();
         ImGui::Text("counter = %d", counter);
 
-        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
         ImGui::End();
     }
 
@@ -3237,5 +3201,15 @@ void gui::Update()
             show_another_window = false;
         ImGui::End();
     }
+}
+
+void gui::Draw()
+{
+    // TODO: better logic?
+
+    gui::BeginFrame();
+    gui::Update();
+    gui::EndFrame();
+    gui::Render();
 }
 #endif

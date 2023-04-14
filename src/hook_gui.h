@@ -4,6 +4,7 @@
 
 struct IDirect3DDevice9;
 struct ImDrawData;
+struct ImGuiIO;
 
 namespace gui
 {
@@ -29,17 +30,31 @@ namespace gui
     /*
         Core
     */
+    bool IsReady();
+    bool IsActive();
+
+    bool Initialize(HWND hwnd, IDirect3DDevice9 *device);
+    
+    void Shutdown();
     void Reset();
+
+    void Toggle();
 
     void BeginFrame();
     void EndFrame();
 
     void Render();
 
+    LRESULT WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
     /*
         user-defined
     */
-    void Initialize(HWND hwnd, IDirect3DDevice9 *device);
-    void Shutdown();
+    bool SetupConfig(ImGuiIO &io);
+
+    void OnReady(ImGuiIO &io);
+    void OnShutdown();
+
     void Update();
+    void Draw();
 };
