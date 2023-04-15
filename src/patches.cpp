@@ -953,7 +953,7 @@ static char* D3DVAL2STR(int etype, int type, int value) {
     case 0:
     {
         switch (type) {
-        case D3DRS_ZENABLE:
+        //case D3DRS_ZENABLE:
         case D3DRS_ZWRITEENABLE:
         case D3DRS_ALPHATESTENABLE:
         case D3DRS_DITHERENABLE:
@@ -963,7 +963,7 @@ static char* D3DVAL2STR(int etype, int type, int value) {
         case D3DRS_RANGEFOGENABLE:
         case D3DRS_STENCILENABLE:
         case D3DRS_NORMALIZENORMALS:
-        case D3DRS_CLIPPLANEENABLE:
+        //case D3DRS_CLIPPLANEENABLE:
         case D3DRS_POINTSPRITEENABLE:
         case D3DRS_POINTSCALEENABLE:
         case D3DRS_MULTISAMPLEANTIALIAS:
@@ -1149,12 +1149,217 @@ static auto d3dStateManager_SetSamplerStateParams = fiero::as<d3dStateManager>::
 static auto d3dStateManager_setGlobalStateParams = fiero::as<d3dStateManager>::func<void,
     StateParamsHolder*, int,
     StateParamsHolder*, int,
-    StateParamsHolder*, int>(0x5DFFF0);
+    
+StateParamsHolder*, int>(0x5DFFF0);
+
+struct tStateParam
+{
+    enum eType
+    {
+        eStateType_None,
+        eStateType_D3DRS,
+        eStateType_D3DTSS,
+        eStateType_D3DSAMP,
+    } state_type;
+
+    enum eValue
+    {
+        eParamValue_Invalid = -1,
+
+        eParamValue_Int,
+        eParamValue_Bool,
+        eParamValue_Float,
+
+        eParamValue_Color,
+
+        eParamValue_Mask8,
+        eParamValue_Mask32,
+    };
+
+    int type;
+
+    const char *name;
+
+    bool valid() {
+        return type != -1;
+    }
+
+    eValue value_type() {
+        if (type == -1)
+            return eParamValue_Invalid;
+
+        switch (state_type)
+        {
+        case eStateType_D3DRS:
+            switch (type)
+            {
+            case D3DRS_ZWRITEENABLE:
+            case D3DRS_ALPHATESTENABLE:
+            case D3DRS_LASTPIXEL:
+            case D3DRS_DITHERENABLE:
+            case D3DRS_ALPHABLENDENABLE:
+            case D3DRS_FOGENABLE:
+            case D3DRS_SPECULARENABLE:
+            case D3DRS_RANGEFOGENABLE:
+            case D3DRS_STENCILENABLE:
+            case D3DRS_CLIPPING:
+            case D3DRS_LIGHTING:
+            case D3DRS_COLORVERTEX:
+            case D3DRS_LOCALVIEWER:
+            case D3DRS_NORMALIZENORMALS:
+            case D3DRS_POINTSPRITEENABLE:
+            case D3DRS_POINTSCALEENABLE:
+            case D3DRS_MULTISAMPLEANTIALIAS:
+            case D3DRS_INDEXEDVERTEXBLENDENABLE:
+            case D3DRS_SCISSORTESTENABLE:
+            case D3DRS_ANTIALIASEDLINEENABLE:
+            case D3DRS_ENABLEADAPTIVETESSELLATION:
+            case D3DRS_TWOSIDEDSTENCILMODE:
+            case D3DRS_SRGBWRITEENABLE:
+            case D3DRS_SEPARATEALPHABLENDENABLE:
+                return eParamValue_Bool;
+
+            case D3DRS_FOGSTART:
+            case D3DRS_FOGEND:
+            case D3DRS_FOGDENSITY:
+            case D3DRS_POINTSIZE:
+            case D3DRS_POINTSIZE_MIN:
+            case D3DRS_POINTSIZE_MAX:
+            case D3DRS_POINTSCALE_A:
+            case D3DRS_POINTSCALE_B:
+            case D3DRS_POINTSCALE_C:
+            case D3DRS_TWEENFACTOR:
+            case D3DRS_SLOPESCALEDEPTHBIAS:
+            case D3DRS_MINTESSELLATIONLEVEL:
+            case D3DRS_MAXTESSELLATIONLEVEL:
+            case D3DRS_ADAPTIVETESS_X:
+            case D3DRS_ADAPTIVETESS_Y:
+            case D3DRS_ADAPTIVETESS_Z:
+            case D3DRS_ADAPTIVETESS_W:
+            case D3DRS_DEPTHBIAS:
+                return eParamValue_Float;
+
+            case D3DRS_FOGCOLOR:
+            case D3DRS_TEXTUREFACTOR:
+            case D3DRS_AMBIENT:
+            case D3DRS_BLENDFACTOR:
+                return eParamValue_Color;
+
+            case D3DRS_ALPHAREF:
+            case D3DRS_COLORWRITEENABLE:
+            case D3DRS_COLORWRITEENABLE1:
+            case D3DRS_COLORWRITEENABLE2:
+            case D3DRS_COLORWRITEENABLE3:
+                return eParamValue_Mask8;
+
+            case D3DRS_STENCILMASK:
+            case D3DRS_STENCILWRITEMASK:
+            case D3DRS_MULTISAMPLEMASK:
+                return eParamValue_Mask32;
+            }
+            break;
+        case eStateType_D3DTSS:
+            switch (type)
+            {
+            case D3DTSS_BUMPENVMAT00:
+            case D3DTSS_BUMPENVMAT01:
+            case D3DTSS_BUMPENVMAT10:
+            case D3DTSS_BUMPENVMAT11:
+            case D3DTSS_BUMPENVLSCALE:
+            case D3DTSS_BUMPENVLOFFSET:
+                return eParamValue_Float;
+            }
+            break;
+        case eStateType_D3DSAMP:
+            switch (type)
+            {
+            case D3DSAMP_MIPMAPLODBIAS:
+                return eParamValue_Float;
+            case D3DSAMP_BORDERCOLOR:
+                return eParamValue_Color;
+            }
+            break;
+        }
+
+        // default return value
+        return eParamValue_Int;
+    }
+};
+
+template <size_t count>
+static bool initParamsList(tStateParam::eType state_type, tStateParam (&params)[count], char * (*getParamName)(int type), int *pNumParams)
+{
+    static_assert(count > 1, "no actual params to initialize!");
+
+    if (!getParamName)
+        return false;
+
+    int numParams = count;
+
+    // initialize list if needed
+    if (params[0].state_type == tStateParam::eStateType_None)
+    {
+        for (int i = 0; i < numParams; i++)
+        {
+            char *name = getParamName(i);
+            int type = i;
+
+            if (name[0] == '?')
+                type = -1;
+
+            params[i].state_type = state_type;
+            params[i].type = type;
+            params[i].name = name;
+        }
+    }
+
+    if (pNumParams)
+        *pNumParams = numParams;
+
+    return true;
+}
+
+static tStateParam * getStateParamsList(tStateParam::eType param_type, int *pNumParams = nullptr)
+{
+    static tStateParam P_D3DRS[220]{ tStateParam::eStateType_None };
+    static tStateParam P_D3DTSS[33]{ tStateParam::eStateType_None };
+    static tStateParam P_D3DSAMP[14]{ tStateParam::eStateType_None };
+
+    int numParams = -1;
+
+    switch (param_type)
+    {
+    case tStateParam::eStateType_D3DRS:
+        if (initParamsList(tStateParam::eStateType_D3DRS, P_D3DRS, D3DRS_STRING, pNumParams))
+            return P_D3DRS;
+        break;
+    case tStateParam::eStateType_D3DTSS:
+        if (initParamsList(tStateParam::eStateType_D3DTSS, P_D3DTSS, D3DTSS_STRING, pNumParams))
+            return P_D3DTSS;
+        break;
+    case tStateParam::eStateType_D3DSAMP:
+        if (initParamsList(tStateParam::eStateType_D3DSAMP, P_D3DSAMP, D3DSAMP_STRING, pNumParams))
+            return P_D3DSAMP;
+        break;
+    }
+
+    return nullptr;
+}
+
+static tStateParam * findStateParam(tStateParam::eType param_type, int type)
+{
+    tStateParam *params = getStateParamsList(param_type);
+
+    if (params != nullptr)
+        return &params[type];
+
+    return nullptr;
+}
 
 /*
     NOT COMPATIBLE WITH PATCH 2
 */
-class d3dStateManager {
+class d3dStateManager : public gui::IMenuHandler {
 public:
     struct stateholder {
         StateParamsHolder texturestates[80];
@@ -1261,15 +1466,113 @@ public:
         *pNumStates = stateidx;
     }
 
-    static int getNextStateTypeToInsert(const StateParamsHolder *states, int nStates, StateParamsHolder *globalstates, int nGlobalStates)
+    void rebuildState(tStateParam::eType state_type, stateholder *state, int *statesToRemove, int nToPop)
+    {
+        switch (state_type)
+        {
+        case tStateParam::eStateType_D3DRS:
+            rebuildState(state->renderstates, &state->renderstatescount, statesToRemove, nToPop);
+            break;
+        case tStateParam::eStateType_D3DTSS:
+            rebuildState(state->texturestates, &state->texturestatescount, statesToRemove, nToPop);
+            break;
+        case tStateParam::eStateType_D3DSAMP:
+            rebuildState(state->samplerstates, &state->samplerstatescount, statesToRemove, nToPop);
+            break;
+        }
+    }
+
+    StateParamsHolder * addNewParamToState(tStateParam::eType state_type, stateholder *state, int *pSlot = nullptr)
+    {
+        StateParamsHolder *new_param = nullptr;
+
+        int slot = -1;
+
+        switch (state_type)
+        {
+        case tStateParam::eStateType_D3DRS:
+            slot = state->renderstatescount++;
+            new_param = &state->renderstates[slot];
+            break;
+        case tStateParam::eStateType_D3DTSS:
+            slot = state->texturestatescount++;
+            new_param = &state->texturestates[slot];
+            break;
+        case tStateParam::eStateType_D3DSAMP:
+            slot = state->samplerstatescount++;
+            new_param = &state->samplerstates[slot];
+            break;
+        }
+
+        if (pSlot)
+            *pSlot = slot;
+
+        return new_param;
+    }
+
+    static int findBestStateTypeValue(const StateParamsHolder &state, StateParamsHolder *globalstates, int nGlobalStates)
     {
         for (int n = 0; n < nGlobalStates; n++)
         {
+            if (globalstates[n].type == state.type)
+                return globalstates[n].value;
+        }
+        
+        // reuse the existing value
+        return state.value;
+    }
+
+    static tStateParam * getNextBestStateParam(tStateParam::eType type, StateParamsHolder *params, int nParams)
+    {
+        int nStateParams = 0;
+        tStateParam *stateparams = getStateParamsList(type, &nParams);
+
+        if (stateparams != nullptr)
+        {
+            int highestParam = 0;
+
+            for (int n = 0; n < nParams; n++)
+            {
+                if (params[n].type > highestParam)
+                    highestParam = params[n].type;
+            }
+
+            // try to select next param after the highest one
+            for (int i = 0; i < nStateParams; i++)
+            {
+                if (!stateparams[i].valid())
+                    continue;
+
+                if (stateparams[i].type > highestParam)
+                    return &stateparams[i];
+            }
+
+            // wrap-around to beginning; find first free param
+            for (int i = 0; i < nStateParams; i++)
+            {
+                if (!stateparams[i].valid())
+                    continue;
+
+                for (int n = 0; n < nParams; n++)
+                {
+                    if (stateparams[i].type != params[n].type)
+                        return &stateparams[i];
+                }
+            }
+        }
+
+        return nullptr;
+    }
+
+    int getNextStateParamToInsert(StateParamsHolder *params, int nParams, StateParamsHolder *globalparams, int nGlobalParams)
+    {
+        for (int n = 0; n < nGlobalParams; n++)
+        {
             bool instate = false;
 
-            for (int k = 0; k < nStates; k++)
+            for (int k = 0; k < nParams; k++)
             {
-                if (states[k].type == globalstates[n].type)
+                if (params[k].type == globalparams[n].type)
                 {
                     instate = true;
                     break;
@@ -1277,164 +1580,291 @@ public:
             }
 
             if (!instate)
-                return globalstates[n].type;
+                return n;
         }
 
         return -1;
     }
 
-    void ShowGUI(bool *p_open)
+    StateParamsHolder * getStateParamsHolder(tStateParam::eType state_type, stateholder *state, int *pNumParams)
     {
-        static char statenames[51][32] = { NULL };
+        if (!pNumParams)
+            return nullptr;
+
+        switch (state_type)
+        {
+        case tStateParam::eStateType_D3DRS:
+            *pNumParams = state->renderstatescount;
+            return state->renderstates;
+        case tStateParam::eStateType_D3DTSS:
+            *pNumParams = state->texturestatescount;
+            return state->texturestates;
+        case tStateParam::eStateType_D3DSAMP:
+            *pNumParams = state->samplerstatescount;
+            return state->samplerstates;
+        }
+
+        return nullptr;
+    }
+
+    void GUI_PushEditableTable(tStateParam::eType state_type, const char *table_name, const char *tag, stateholder *state, int i)
+    {
+        ImGuiTableFlags flags = ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingFixedFit;
+
+        int nStateParams = 0;
+        StateParamsHolder *stateparams = getStateParamsHolder(state_type, state, &nStateParams);
+
+        int nParams = 0;
+        tStateParam *params = getStateParamsList(state_type, &nParams);
+
+        if (!stateparams || !params)
+        {
+            ImGui::Text("Something went wrong building '%s'(%s)!", table_name, tag);
+            return;
+        }
+
+        int nGlobalParams = 0;
+        StateParamsHolder *globalparams = nullptr;
+
+        ImGui::Text("%s:", table_name);
+
+        if (i != -1)
+            globalparams = getStateParamsHolder(state_type, &globalstate, &nGlobalParams);
+
+        if (ImGui::BeginTable(string_buf<80>("##%stbl%d", tag, i + 1), 2, flags))
+        {
+            ImGui::TableSetupColumn("Type");
+            ImGui::TableSetupColumn("Value");
+
+            ImGui::TableHeadersRow();
+
+            int toBeRemoved[80] = { 0 };
+            int nToPop = 0;
+
+            for (int n = 0; n < nStateParams; n++)
+            {
+                auto &param = stateparams[n];
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+
+                if (ImGui::Button(string_buf<80>("-##%s%d", tag, n + 1)))
+                {
+                    toBeRemoved[n] = 1;
+                    nToPop++;
+                }
+
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(230);
+
+                if (ImGui::BeginCombo(string_buf<80>("##%sname%d", tag, n + 1), params[param.type].name))
+                {
+                    for (int k = 0; k < nParams; k++)
+                    {
+                        if (params[k].type == -1)
+                            continue;
+
+                        const bool is_selected = (param.type == k);
+                        if (ImGui::Selectable(params[k].name, is_selected))
+                        {
+                            param.type = k;
+
+                            if (nGlobalParams)
+                                param.value = findBestStateTypeValue(param, globalparams, nGlobalParams);
+                        }
+
+                        if (is_selected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+
+                    ImGui::EndCombo();
+                }
+
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(80);
+
+                string_buf<80> input_name("##%sval%d", tag, n+1);
+
+                void *p_data = &param.value;
+
+                switch (params[param.type].value_type())
+                {
+                case tStateParam::eParamValue_Bool:
+                    if (ImGui::InputScalar(input_name, ImGuiDataType_S32, p_data, NULL, NULL, "%d", ImGuiInputTextFlags_CharsDecimal))
+                    {
+                        if ((param.value & 1) != param.value)
+                        {
+                            if (param.value < 0)
+                                param.value = 0;
+                            if (param.value > 1)
+                                param.value = 1;
+                        }
+                    }
+                    break;
+                case tStateParam::eParamValue_Int:
+                    ImGui::InputScalar(input_name, ImGuiDataType_S32, p_data, NULL, NULL, "%d", ImGuiInputTextFlags_CharsDecimal);
+                    break;
+                case tStateParam::eParamValue_Float:
+                    ImGui::InputScalar(input_name, ImGuiDataType_Float, p_data, NULL, NULL, "%.6f", ImGuiInputTextFlags_CharsDecimal);
+                    break;
+                case tStateParam::eParamValue_Mask8:
+                    ImGui::InputScalar(input_name, ImGuiDataType_U32, p_data, NULL, NULL, "%02X", ImGuiInputTextFlags_CharsHexadecimal);
+                    break;
+                case tStateParam::eParamValue_Color:
+                case tStateParam::eParamValue_Mask32:
+                    ImGui::InputScalar(input_name, ImGuiDataType_U32, p_data, NULL, NULL, "%08X", ImGuiInputTextFlags_CharsHexadecimal);
+                    break;
+                }
+            }
+
+            if (nStateParams < 80)
+            {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+
+                if (ImGui::Button(string_buf<80>("+##%s", tag)))
+                {
+                    StateParamsHolder *copy_param = nullptr;
+                    tStateParam *next_param = nullptr;
+
+                    if (nGlobalParams)
+                    {
+                        int copytype = getNextStateParamToInsert(stateparams, nStateParams, globalparams, nGlobalParams);
+
+                        if (copytype != -1)
+                            copy_param = &globalparams[copytype];
+                    }
+
+                    if (!copy_param)
+                    {
+                        next_param = getNextBestStateParam(state_type, stateparams, nStateParams);
+
+                        if (!next_param)
+                            copy_param = &stateparams[nStateParams - 1];
+                    }
+
+                    int new_slot = -1;
+                    auto *new_param = addNewParamToState(state_type, state, &new_slot);
+
+                    if (copy_param)
+                    {
+                        *new_param = *copy_param;
+                    }
+                    else if (next_param)
+                    {
+                        new_param->type = next_param->type;
+                    }
+                    else
+                    {
+                        toBeRemoved[new_slot] = 1;
+                        nToPop++;
+                    }
+                }
+
+                //ImGui::SameLine();
+                //ImGui::Text("Add new parameter");
+            }
+
+            if (nToPop > 0)
+                rebuildState(state_type, state, toBeRemoved, nToPop);
+
+            ImGui::EndTable();
+        }
+    }
+
+    const char *getStateName(int state)
+    {
+        static char statenames[51][128] = { NULL };
+
+        static struct {
+            int type;
+            const char *name;
+        } statename_lookup[] = {
+            { 0, "default #2" },
+            { 1, "default #1" },
+            { 2, "road" },
+            { 3, "clutter" },
+            { 4, "sky / reflected sky" },
+            { 5, "low poly" },
+            { 6, "pre water #2" },
+            { 7, "clutter overlay" },
+            { 9, "grime overlay" },
+            { 10, "cars" },
+            { 11, "characters / car interior #1" },
+            { 12, "transparency" },
+            { 13, "particles" },
+            { 14, "far water 1 #1" },
+            { 15, "far water 2" },
+            { 16, "far water 3" },
+            { 17, "anti-shadows #1" },
+            { 18, "anti-shadows #2" },
+            { 19, "fullbright overlays" },
+            { 20, "far water 1 #2" },
+            { 21, "glowing light" },
+            { 22, "characters / car interior #2" },
+            { 23, "overlays" },
+            { 25, "overhead map" },
+            { 26, "untextured semi-transparent" },
+            { 27, "road #2" },
+            { 28, "post road #2" },
+            { 30, "portals / pre water" },
+            { 31, "shadows" },
+            { 32, "lighting?" },
+            { 39, "shadows final pass?" },
+            { 40, "clutter #2" },
+            { 41, "<unused>" },
+            { 42, "lit/specular final pass?" },
+            { 43, "fullbright overlays #2" },
+            { 44, "unlit final pass?" },
+            { 48, "streetlight glows" },
+            { 49, "underwater" },
+            { -1, NULL },
+        };
+
+        if (state == -1)
+            return "global state";
 
         if (statenames[0][0] == NULL)
         {
+            //for (auto *lookup = statename_lookup; lookup->type != -1; lookup++)
+            //    sprintf(statenames[lookup->type], "state %d: [%s]", lookup->type, lookup->name);
+
             for (int i = 0; i < 51; i++)
-                sprintf(statenames[i], "state %d", i + 1);
+            {
+                if (statenames[i][0] == NULL)
+                    sprintf(statenames[i], "state %d", i);
+            }
+        }
+
+        return statenames[state];
+    }
+
+    void ShowGUI(bool *p_open)
+    {
+        static char statenames[52][32] = { NULL };
+
+        if (statenames[0][0] == NULL)
+        {
+            strcpy(statenames[0], "global state");
+
+            for (int i = 0; i < 51; i++)
+                sprintf(statenames[i + 1], "state %d", i);
         }
 
         ImGui::Begin("Render States Editor", p_open);
-        ImGui::Text("nStates = %d", nStates);
-
-        for (int i = 0; i < nStates; i++)
+        
+        for (int i = -1; i < nStates; i++)
         {
-            stateholder *state = &states[i];
+            stateholder *state = (i == -1) ? &globalstate : &states[i];
 
-            ImGuiTableFlags flags = ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_Borders;
-            int count = 0;
-
-            if (ImGui::TreeNode(statenames[i]))
+            if (ImGui::TreeNode(getStateName(i)))
             {
-                if (ImGui::BeginTable(string_buf<128>("render states##%d", i + 1), 2, flags))
-                {
-                    static char *rsnames[220] = { nullptr };
-
-                    if (rsnames[0] == nullptr)
-                    {
-                        for (int n = 0; n < 220; n++)
-                            rsnames[n] = D3DRS_STRING(n);
-                    }
-
-                    ImGui::TableSetupColumn("Type");
-                    ImGui::TableSetupColumn("Value");
-                    ImGui::TableHeadersRow();
-
-                    int toBeRemoved[80] = { 0 };
-                    int nToPop = 0;
-
-                    for (int n = 0; n < state->renderstatescount; n++)
-                    {
-                        auto &rs = state->renderstates[n];
-
-                        ImGui::TableNextRow();
-
-                        ImGui::TableNextColumn();
-
-                        if (ImGui::Button(string_buf<32>("-##rs%d", n + 1)))
-                        {
-                            toBeRemoved[n] = 1;
-                            nToPop++;
-                        }
-
-                        ImGui::SameLine();
-
-                        if (ImGui::BeginCombo(string_buf<32>("##rsname%d", n + 1), rsnames[rs.type]))
-                        {
-                            for (int k = 0; k < IM_ARRAYSIZE(rsnames); k++)
-                            {
-                                if (rsnames[k][0] == '?')
-                                    continue;
-
-                                const bool is_selected = (rs.type == k);
-                                if (ImGui::Selectable(rsnames[k], is_selected))
-                                    rs.type = k;
-
-                                if (is_selected)
-                                    ImGui::SetItemDefaultFocus();
-                            }
-
-                            ImGui::EndCombo();
-                        }
-                        
-                        ImGui::TableNextColumn();
-                        ImGui::InputScalar(string_buf<32>("##rsval%d", n+1), ImGuiDataType_U32, &rs.value, NULL, NULL, "%X", ImGuiInputTextFlags_CharsHexadecimal);
-                    }
-
-                    if (nToPop > 0)
-                        rebuildState(state->renderstates, &state->renderstatescount, toBeRemoved, nToPop);
-
-                    if (state->renderstatescount < 80 && ImGui::Button("+##rs"))
-                    {
-                        auto &rs = state->renderstates[state->renderstatescount];
-
-                        int newtype = getNextStateTypeToInsert(state->renderstates, state->renderstatescount, globalstate.renderstates, globalstate.renderstatescount);
-
-                        if (newtype == -1)
-                        {
-                            newtype = globalstate.renderstates[globalstate.renderstatescount - 1].type + 1;
-                            while (rsnames[newtype][0] == '?')
-                                newtype++;
-
-                            rs.type = newtype;
-                        }
-                        else
-                        {
-                            rs = globalstate.renderstates[newtype];
-                        }
-
-                        state->renderstatescount++;
-                    }
-
-                    ImGui::EndTable();
-                }
-
-                if (state->texturestatescount && ImGui::BeginTable(string_buf<128>("texture states##%d", i + 1), 2, flags))
-                {
-                    ImGui::TableSetupColumn("Type");
-                    ImGui::TableSetupColumn("Value");
-                    ImGui::TableHeadersRow();
-
-                    for (int n = 0; n < state->texturestatescount; n++)
-                    {
-                        auto &ts = state->texturestates[n];
-
-                        ImGui::TableNextRow();
-
-                        ImGui::TableNextColumn();
-                        ImGui::TextDisabled(D3DTSS_STRING(ts.type));
-
-                        ImGui::TableNextColumn();
-                        ImGui::InputScalar(string_buf<32>("##tsval%d", n+1), ImGuiDataType_U32, &ts.value, NULL, NULL, "%X", ImGuiInputTextFlags_CharsHexadecimal);
-                    }
-
-                    ImGui::EndTable();
-                }
-
-                if (state->samplerstatescount && ImGui::BeginTable(string_buf<128>("sampler states##%d", i + 1), 2, flags))
-                {
-                    ImGui::TableSetupColumn("Type");
-                    ImGui::TableSetupColumn("Value");
-                    ImGui::TableHeadersRow();
-
-                    for (int n = 0; n < state->samplerstatescount; n++)
-                    {
-                        auto &ss = state->samplerstates[n];
-
-                        ImGui::TableNextRow();
-
-                        ImGui::TableNextColumn();
-                        ImGui::TextDisabled(D3DTSS_STRING(ss.type));
-
-                        ImGui::TableNextColumn();
-                        ImGui::InputScalar(string_buf<32>("##ssval%d", n+1), ImGuiDataType_U32, &ss.value, NULL, NULL, "%X", ImGuiInputTextFlags_CharsHexadecimal);
-                    }
-
-                    ImGui::EndTable();
-                }
+                GUI_PushEditableTable(tStateParam::eStateType_D3DRS, "render states", "rs", state, i);
+                GUI_PushEditableTable(tStateParam::eStateType_D3DTSS, "texture stage states", "tss", state, i);
+                GUI_PushEditableTable(tStateParam::eStateType_D3DSAMP, "sampler states", "ss", state, i);
 
                 ImGui::TreePop();
             }
-
         }
 
         ImGui::End();
@@ -3369,7 +3799,8 @@ void gui::OnReady(ImGuiIO &io)
 // just before everything gets destroyed
 void gui::OnShutdown()
 {
-
+    // free menus memory
+    gui::menus::FreeAll();
 }
 
 // update the gui
@@ -3380,6 +3811,8 @@ void gui::Update()
     static bool show_another_window = false;
 
     static bool show_state_editor = false;
+
+    static auto state_editor = gui::menus::Create(&pD3DStateManager);
 
     // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
     if (show_demo_window)
@@ -3394,9 +3827,8 @@ void gui::Update()
 
         ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
 
-        if (ImGui::Button("Render State Editor"))
-            show_state_editor = !show_state_editor;
-
+        state_editor->PushButton("Render State Editor");
+        
         if (ImGui::Button("Kill me!"))
             ExitProcess(0);
 
@@ -3416,8 +3848,10 @@ void gui::Update()
         ImGui::End();
     }
 
-    if (show_state_editor)
-        pD3DStateManager->ShowGUI(&show_state_editor);
+    gui::menus::UpdateAll();
+
+    //if (show_state_editor)
+    //    pD3DStateManager->ShowGUI(&show_state_editor);
 
     // 3. Show another simple window.
     if (show_another_window)
