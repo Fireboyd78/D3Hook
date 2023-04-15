@@ -1135,3 +1135,50 @@ void gui::Toggle()
     else
         g_bActive = false;
 }
+
+/*
+    gui::menus
+*/
+
+using namespace gui::menus::fx;
+
+bool gui::menus::fx::AlwaysTrue()
+{
+    return true;
+}
+
+static menu_base *g_menus;
+
+menu_base::~menu_base() {
+    if (next != nullptr)
+    {
+        delete next;
+        next = nullptr;
+    }
+}
+
+void menu_base::Register() {
+    this->next = g_menus;
+    g_menus = this;
+}
+
+void menu_base::UpdateAll() {
+    for (auto menu = g_menus; menu != nullptr; menu = menu->next) {
+        menu->Update();
+    }
+}
+
+void menu_base::FreeAll() {
+    // destructor shall delete any linked children
+    delete g_menus;
+}
+
+void gui::menus::UpdateAll()
+{
+    menu_base::UpdateAll();
+}
+
+void gui::menus::FreeAll()
+{
+    menu_base::FreeAll();
+}
